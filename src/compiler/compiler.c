@@ -248,7 +248,7 @@ static void setup_int_define(const char *id, uint64_t i)
 	id = symtab_add(id, strlen(id), fnv1a(id, strlen(id)), &token_type);
 	Expr *expr = expr_new(EXPR_CONST, INVALID_RANGE);
 	expr_const_set_int(&expr->const_expr, i, TYPE_IXX);
-	expr->original_type = expr->type = type_compint;
+	expr->type = type_compint;
 	expr->span = INVALID_RANGE;
 	expr->resolve_status = RESOLVE_NOT_DONE;
 	void *previous = stable_set(&global_context.compiler_defines, id, expr);
@@ -264,7 +264,7 @@ static void setup_bool_define(const char *id, bool value)
 	id = symtab_add(id, strlen(id), fnv1a(id, strlen(id)), &token_type);
 	Expr *expr = expr_new(EXPR_CONST, INVALID_RANGE);
 	expr_const_set_bool(&expr->const_expr, value);
-	expr->original_type = expr->type = type_bool;
+	expr->type = type_bool;
 	expr->span = INVALID_RANGE;
 	expr->resolve_status = RESOLVE_NOT_DONE;
 	void *previous = stable_set(&global_context.compiler_defines, id, expr);

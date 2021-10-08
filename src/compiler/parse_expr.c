@@ -994,8 +994,10 @@ static Expr *parse_integer(Context *context, Expr *left)
 			break;
 	}
 	expr_int->const_expr.const_kind = CONST_INTEGER;
-	expr_int->const_expr.int_type = TYPE_IXX;
-	expr_set_type(expr_int, type_compint);
+	Type *type = type_cint();
+	expr_int->const_expr.int_type = type->type_kind;
+	expr_set_type(expr_int, type);
+	expr_int->const_expr.narrowable = true;
 	advance(context);
 	return expr_int;
 }
@@ -1265,7 +1267,7 @@ static Expr *parse_bool(Context *context, Expr *left)
 	assert(!left && "Had left hand side");
 	Expr *number = EXPR_NEW_TOKEN(EXPR_CONST, context->tok);
 	number->const_expr = (ExprConst) { .b = TOKEN_IS(TOKEN_TRUE), .const_kind = CONST_BOOL };
-	expr_set_type(number, type_bool);
+	number->type = type_bool;
 	advance(context);
 	return number;
 }

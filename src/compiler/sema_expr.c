@@ -98,7 +98,6 @@ void expr_copy_properties(Expr *to, Expr *from)
 void expr_copy_types(Expr *to, Expr *from)
 {
 	to->type = from->type;
-	to->original_type = from->original_type;
 }
 
 void expr_insert_addr(Expr *original)
@@ -398,7 +397,6 @@ static void expr_unify_binary_properties(Expr *expr, Expr *left, Expr *right)
 static void expr_unify_binary(Expr *expr, Expr *left, Expr *right)
 {
 	expr->type = left->type;
-	expr->original_type = type_find_max_type(left->original_type->canonical, right->original_type->canonical);
 	expr_unify_binary_properties(expr, left, right);
 }
 
@@ -870,7 +868,7 @@ static inline bool sema_expr_analyse_macro_expansion(Context *context, Expr *exp
 			expr->body_expansion_expr.ast = NULL;
 			expr->body_expansion_expr.declarations = NULL;
 			expr->resolve_status = RESOLVE_NOT_DONE;
-			expr->type = expr->original_type = type_void;
+			expr->type = type_void;
 			return true;
 		}
 	}
@@ -2657,7 +2655,6 @@ CHECK_DEEPER:
 		{
 			expr->expr_kind = EXPR_LEN;
 			expr->len_expr.inner = parent;
-			expr->original_type = type_compint;
 			expr->type = type_usize;
 			expr->resolve_status = RESOLVE_DONE;
 			return true;
@@ -3945,7 +3942,6 @@ static Type *numeric_arithmetic_promotion(Type *type)
 
 static bool binary_arithmetic_promotion(Context *context, Expr *left, Expr *right, Type *left_type, Type *right_type, Expr *parent, const char *error_message)
 {
-
 	Type *max = numeric_arithmetic_promotion(type_find_max_type(left_type, right_type));
 	if (!max || !type_underlying_is_numeric(max))
 	{
@@ -4155,7 +4151,7 @@ static bool sema_expr_analyse_add(Context *context, Type *to, Expr *expr, Expr *
 		(void)success;
 
 		// 3c. Set the type and other properties.
-		expr_copy_types(expr, left);
+		expr->type = left->type;
 		expr_unify_binary_properties(expr, left, right);
 
 		if (cast_to_iptr)
@@ -4473,7 +4469,6 @@ static bool sema_expr_analyse_shift(Context *context, Type *to, Expr *expr, Expr
 		{
 			// 7a. The target type exists, convert to this type after arithmetic promotion.
 			if (!cast_implicit(left, numeric_arithmetic_promotion(to))) return false;
-			left->original_type = to;
 		}
 		else
 		{
@@ -5328,7 +5323,6 @@ static inline bool sema_expr_analyse_else(Context *context, Type *to, Expr *expr
 	if (!cast_implicit(expr->else_expr.else_expr, common)) return false;
 
 	expr->type = common;
-	expr->original_type = type_find_max_type(inner->original_type, expr->else_expr.else_expr->original_type);
 
 	return cast_implicit(expr->else_expr.expr, common);
 }

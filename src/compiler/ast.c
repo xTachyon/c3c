@@ -223,7 +223,7 @@ Expr *expr_new(ExprKind kind, SourceSpan start)
 	Expr *expr = expr_calloc();
 	expr->expr_kind = kind;
 	expr->span = start;
-	expr->type = expr->original_type = NULL;
+	expr->type = NULL;
 	return expr;
 }
 

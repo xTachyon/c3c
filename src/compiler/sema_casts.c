@@ -737,22 +737,211 @@ bool may_convert_const_implicit(Expr *expr, Type *to_type)
 
 	}
 }
+Expr *recursive_may_narrow_int(Expr *expr, Type *type)
+{
+	switch (expr->expr_kind)
+	{
+		case EXPR_BINARY:
+			switch (expr->binary_expr.operator)
+			{
+				case BINARYOP_ERROR:
+					UNREACHABLE
+				case BINARYOP_MULT:
+				case BINARYOP_SUB:
+				case BINARYOP_ADD:
+				case BINARYOP_DIV:
+				case BINARYOP_MOD:
+				case BINARYOP_BIT_OR:
+				case BINARYOP_BIT_XOR:
+				case BINARYOP_BIT_AND:
+				{
+					Expr *res = recursive_may_narrow_int(expr->binary_expr.left, type);
+					if (res) return res;
+					return recursive_may_narrow_int(expr->binary_expr.right, type);
+				}
+				case BINARYOP_AND:
+				case BINARYOP_OR:
+				case BINARYOP_GT:
+				case BINARYOP_GE:
+				case BINARYOP_LT:
+				case BINARYOP_LE:
+				case BINARYOP_NE:
+				case BINARYOP_EQ:
+					return NULL;
+				case BINARYOP_SHR:
+				case BINARYOP_SHL:
+				case BINARYOP_ASSIGN:
+				case BINARYOP_ADD_ASSIGN:
+				case BINARYOP_BIT_AND_ASSIGN:
+				case BINARYOP_BIT_OR_ASSIGN:
+				case BINARYOP_BIT_XOR_ASSIGN:
+				case BINARYOP_DIV_ASSIGN:
+				case BINARYOP_MOD_ASSIGN:
+				case BINARYOP_MULT_ASSIGN:
+				case BINARYOP_SHR_ASSIGN:
+				case BINARYOP_SHL_ASSIGN:
+				case BINARYOP_SUB_ASSIGN:
+					return recursive_may_narrow_int(expr->binary_expr.left, type);
+			}
+			break;
+		case EXPR_MACRO_BODY_EXPANSION:
+		case EXPR_CALL:
+		case EXPR_POISONED:
+		case EXPR_ACCESS:
+		case EXPR_CATCH_UNWRAP:
+		case EXPR_COMPOUND_LITERAL:
+		case EXPR_COND:
+		case EXPR_DECL:
+		case EXPR_CT_IDENT:
+		case EXPR_DESIGNATOR:
+		case EXPR_EXPR_BLOCK:
+		case EXPR_MACRO_BLOCK:
+		case EXPR_MACRO_EXPANSION:
+		case EXPR_IDENTIFIER:
+		case EXPR_SLICE_ASSIGN:
+		case EXPR_SLICE:
+		case EXPR_SUBSCRIPT:
+			if (type_size(expr->type) > type_size(type)) return expr;
+			return NULL;
+		case EXPR_LEN:
+			if (type_size(type) < type_size(type_cint())) return expr;
+			return NULL;
+		case EXPR_ELSE:
+		{
+			Expr *res = recursive_may_narrow_int(expr->else_expr.expr, type);
+			if (res) return res;
+			if (expr->else_expr.is_jump) return NULL;
+			return recursive_may_narrow_int(expr->else_expr.else_expr, type);
+		}
+		case EXPR_EXPRESSION_LIST:
+			return recursive_may_narrow_int(VECLAST(expr->expression_list), type);
+		case EXPR_GROUP:
+			return recursive_may_narrow_int(expr->group_expr, type);
+		case EXPR_GUARD:
+			return recursive_may_narrow_int(expr->guard_expr.inner, type);
+		case EXPR_TERNARY:
+		{
+			Expr *res = recursive_may_narrow_int(expr->ternary_expr.then_expr ? expr->ternary_expr.then_expr
+			                                                                  : expr->ternary_expr.cond, type);
+			if (res) return res;
+			return recursive_may_narrow_int(expr->ternary_expr.else_expr, type);
+		}
+		case EXPR_CAST:
+			if (expr->cast_expr.implicit)
+			{
+				return recursive_may_narrow_int(expr->cast_expr.expr, type);
+			}
+			return type_size(expr->type) > type_size(type) ? expr : NULL;
+		case EXPR_CONST:
+			if (!expr->const_expr.narrowable)
+			{
+				return type_size(expr->type) > type_size(type) ? expr : NULL;
+			}
+			assert(expr->const_expr.const_kind == CONST_INTEGER);
+			if (expr_const_will_overflow(&expr->const_expr, type_flatten(type)->type_kind))
+			{
+				return expr;
+			}
+			return NULL;
+		case EXPR_CONST_IDENTIFIER:
+			return type_size(expr->type) > type_size(type) ? expr : NULL;
+		case EXPR_FAILABLE:
+		case EXPR_HASH_IDENT:
+		case EXPR_FLATPATH:
+		case EXPR_INITIALIZER_LIST:
+		case EXPR_DESIGNATED_INITIALIZER_LIST:
+		case EXPR_PLACEHOLDER:
+		case EXPR_TYPEID:
+		case EXPR_TYPEINFO:
+		case EXPR_TYPEOF:
+		case EXPR_UNDEF:
+		case EXPR_CT_CALL:
+		case EXPR_NOP:
+			UNREACHABLE
+		case EXPR_POST_UNARY:
+			return recursive_may_narrow_int(expr->unary_expr.expr, type);
+		case EXPR_SCOPED_EXPR:
+			return recursive_may_narrow_int(expr->expr_scope.expr, type);
+		case EXPR_TRY:
+			assert(expr->try_expr.is_try);
+			return recursive_may_narrow_int(expr->try_expr.expr, type);
+		case EXPR_TRY_UNWRAP:
+			TODO
+		case EXPR_TRY_UNWRAP_CHAIN:
+			TODO
+		case EXPR_TRY_ASSIGN:
+			return recursive_may_narrow_int(expr->try_assign_expr.expr, type);
+		case EXPR_UNARY:
+		{
+			switch (expr->unary_expr.operator)
+			{
+				case UNARYOP_ERROR:
+				case UNARYOP_DEREF:
+				case UNARYOP_ADDR:
+				case UNARYOP_NOT:
+				case UNARYOP_TADDR:
+					UNREACHABLE
+				case UNARYOP_NEG:
+				case UNARYOP_BITNEG:
+				case UNARYOP_INC:
+				case UNARYOP_DEC:
+					return recursive_may_narrow_int(expr->unary_expr.expr, type);
+			}
+		}
+	}
+}
 bool cast_implicit(Expr *expr, Type *to_type)
 {
-	assert(expr->original_type);
-	if (expr->type == to_type) return true;
-	if (!cast_may_implicit(expr->original_type, to_type) && !cast_may_implicit(expr->type->canonical, to_type))
+	Type *expr_canonical = expr->type->canonical;
+	Type *to_canonical = to_type->canonical;
+	if (expr_canonical == to_canonical) return true;
+	if (!cast_may_implicit(expr_canonical, to_canonical))
 	{
-		if (cast_may_explicit(expr->original_type, to_type) || cast_may_implicit(expr->type->canonical, to_type))
+		if (!cast_may_explicit(expr_canonical, to_canonical))
 		{
-			SEMA_ERROR(expr, "Implicitly casting %s to %s is not permitted, but you can do an explicit cast using '(<type>)(value)'.", type_quoted_error_string(expr->original_type), type_quoted_error_string(to_type));
+			SEMA_ERROR(expr, "You cannot cast %s into %s even with an explicit cast, so this looks like an error.", type_quoted_error_string(expr->type), type_quoted_error_string(to_type));
+			return false;
 		}
-		else
+		if (expr->expr_kind == EXPR_CONST)
 		{
-			SEMA_ERROR(expr, "You cannot cast anything %s into %s even with an explicit cast, so this looks like an error.", type_quoted_error_string(expr->original_type), type_quoted_error_string(to_type));
+			Type *expr_flatten = type_flatten_distinct(expr_canonical);
+			Type *to_flatten = type_flatten_distinct(to_canonical);
+			if (type_is_integer(expr_flatten) && type_is_integer(to_flatten))
+			{
+				Expr *problem = recursive_may_narrow_int(expr, to_canonical);
+				if (problem)
+				{
+					SEMA_ERROR(problem, "The value '%s' is out of range for %s.", expr_const_to_error_string(&expr->const_expr),
+							   type_quoted_error_string(to_type));
+					return false;
+				}
+				goto OK;
+			}
+			if (type_is_float(expr_flatten) && type_is_float(to_flatten)) goto OK;
 		}
+		if (type_is_integer(expr_canonical) && type_is_integer(to_canonical))
+		{
+			assert(type_size(expr_canonical) > type_size(to_canonical));
+			Expr *problem = recursive_may_narrow_int(expr, to_canonical);
+			if (problem)
+			{
+				SEMA_ERROR(problem, "Cannot narrow %s to %s.", type_quoted_error_string(problem->type),
+				           type_quoted_error_string(to_type));
+				return false;
+			}
+			goto OK;
+		}
+		if (type_is_float(expr_canonical) && type_is_float(to_canonical))
+		{
+			assert(type_size(expr_canonical) > type_size(to_canonical));
+			// TODO Recursively check
+			goto OK;
+		}
+		SEMA_ERROR(expr, "Implicitly casting %s to %s is not permitted, but you can do an explicit cast using '(<type>)(value)'.", type_quoted_error_string(expr->type), type_quoted_error_string(to_type));
 		return false;
 	}
+
+	OK:
 	// Additional checks for compile time values.
 	if (expr->expr_kind == EXPR_CONST)
 	{
@@ -765,9 +954,8 @@ bool cast_implicit(Expr *expr, Type *to_type)
 			if (!may_convert_int_const_implicit(expr, to_type)) return false;
 		}
 	}
-	Type *original_type = expr->original_type ? expr->original_type : expr->type;
 	cast(expr, to_type);
-	expr->original_type = original_type;
+	if (expr->expr_kind == EXPR_CAST) expr->cast_expr.implicit = true;
 	return true;
 }
 

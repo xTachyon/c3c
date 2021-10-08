@@ -125,7 +125,8 @@ typedef struct ConstInitializer_
 
 typedef struct
 {
-	ConstKind const_kind;
+	ConstKind const_kind : 8;
+	bool narrowable : 1;
 	union
 	{
 		struct
@@ -797,6 +798,7 @@ typedef struct
 typedef struct
 {
 	CastKind kind;
+	bool implicit;
 	Expr *expr;
 	TypeInfo *type_info;
 	union
@@ -924,7 +926,6 @@ struct Expr_
 	bool pure : 1;
 	SourceSpan span;
 	Type *type;
-	Type *original_type;
 	union {
 		Expr *group_expr;
 		ExprLen len_expr;
@@ -1824,7 +1825,6 @@ static inline void expr_set_type(Expr *expr, Type *type)
 {
 	assert(type);
 	expr->type = type;
-	expr->original_type = type;
 }
 
 

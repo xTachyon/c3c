@@ -1287,7 +1287,7 @@ static inline bool sema_analyse_foreach_stmt(Context *context, Ast *statement)
 		{
 			// This is hackish, replace when cast is refactored.
 			Expr dummy = { .resolve_status = RESOLVE_DONE, .span = { var->var.type_info->span.loc,
-			                                                         var->span.end_loc }, .expr_kind = EXPR_IDENTIFIER, .type = expected_var_type, .original_type = expected_var_type };
+			                                                         var->span.end_loc }, .expr_kind = EXPR_IDENTIFIER, .type = expected_var_type };
 			if (!cast_implicit(&dummy, var->type)) return SCOPE_POP_ERROR();
 
 			assert(dummy.expr_kind == EXPR_CAST);
@@ -1722,7 +1722,7 @@ static bool sema_analyse_case_expr(Context *context, Type* to_type, Ast *case_st
 	// 1. Try to do implicit conversion to the correct type.
 	if (!sema_analyse_expr(context, to_type, case_expr)) return false;
 
-	Type *case_type = case_expr->original_type->canonical;
+	Type *case_type = case_expr->type->canonical;
 	Type *to_type_canonical = to_type->canonical;
 
 	// 3. If we already have the same type we're done.
