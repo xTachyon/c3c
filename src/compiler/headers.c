@@ -50,7 +50,6 @@ static void header_print_type(FILE *file, Type *type)
 			OUTPUT("int32_t");
 			return;
 		case TYPE_I64:
-		case TYPE_IXX:
 			OUTPUT("int64_t");
 			return;
 		case TYPE_I128:
@@ -78,7 +77,6 @@ static void header_print_type(FILE *file, Type *type)
 			OUTPUT("float");
 			return;
 		case TYPE_F64:
-		case TYPE_FXX:
 			OUTPUT("double");
 			return;
 		case TYPE_F128:

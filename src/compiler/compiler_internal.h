@@ -1551,7 +1551,6 @@ extern Type *type_ichar, *type_short, *type_int, *type_long, *type_isize;
 extern Type *type_char, *type_ushort, *type_uint, *type_ulong, *type_usize;
 extern Type *type_iptr, *type_uptr, *type_iptrdiff, *type_uptrdiff;
 extern Type *type_u128, *type_i128;
-extern Type *type_compint, *type_compfloat;
 extern Type *type_typeid, *type_anyerr, *type_typeinfo;
 extern Type *type_virtual, *type_virtual_generic;
 extern Type *type_complist;
@@ -1682,7 +1681,6 @@ static inline bool type_may_negate(Type *type)
 		case ALL_FLOATS:
 		case ALL_SIGNED_INTS:
 		case TYPE_VECTOR:
-		case TYPE_IXX:
 			return true;
 		case TYPE_DISTINCT:
 			type = type->decl->distinct_decl.base_type;
@@ -1704,8 +1702,6 @@ bool cast_may_explicit(Type *from_type, Type *to_type);
 bool cast_implicit_bit_width(Expr *expr, Type *to_type);
 
 CastKind cast_to_bool_kind(Type *type);
-
-bool cast_implicitly_to_runtime(Expr *expr);
 
 const char *llvm_codegen(void *context);
 void *llvm_gen(Module *module);
@@ -1990,7 +1986,6 @@ Type *type_cuint(void);
 Type *type_int_signed_by_bitsize(unsigned bitsize);
 Type *type_int_unsigned_by_bitsize(unsigned bytesize);
 bool type_is_abi_aggregate(Type *type);
-static inline bool type_is_any_integer(Type *type);
 static inline bool type_is_builtin(TypeKind kind);
 bool type_is_empty_record(Type *type, bool allow_array);
 bool type_is_empty_field(Type *type, bool allow_array);
@@ -2001,7 +1996,7 @@ Type *type_find_function_type(FunctionSignature *signature);
 static inline bool type_is_integer(Type *type);
 static inline bool type_is_integer_unsigned(Type *type);
 static inline bool type_is_integer_signed(Type *type);
-static inline bool type_is_integer_kind(Type *type);
+static inline bool type_is_integer_or_bool_kind(Type *type);
 static inline bool type_is_numeric(Type *type);
 static inline bool type_underlying_is_numeric(Type *type);
 static inline bool type_is_pointer(Type *type);
@@ -2056,32 +2051,29 @@ static inline bool type_is_pointer_sized(Type *type)
 
 static inline bool type_is_integer(Type *type)
 {
-	assert(type == type->canonical);
-	return type->type_kind >= TYPE_I8 && type->type_kind < TYPE_IXX;
-}
-
-static inline bool type_is_any_integer(Type *type)
-{
-	assert(type == type->canonical);
-	return type->type_kind >= TYPE_I8 && type->type_kind <= TYPE_IXX;
+	TypeKind kind = type->type_kind;
+	if (kind == TYPE_DISTINCT) kind = type->canonical->type_kind;
+	return kind >= TYPE_INTEGER_FIRST && type->type_kind <= TYPE_INTEGER_LAST;
 }
 
 static inline bool type_is_integer_signed(Type *type)
 {
-	assert(type == type->canonical);
-	return type->type_kind >= TYPE_I8 && type->type_kind < TYPE_U8;
+	TypeKind kind = type->type_kind;
+	if (kind == TYPE_DISTINCT) kind = type->canonical->type_kind;
+	return kind >= TYPE_INT_FIRST && type->type_kind <= TYPE_INT_LAST;
 }
 
-static inline bool type_is_integer_kind(Type *type)
+static inline bool type_is_integer_or_bool_kind(Type *type)
 {
 	assert(type == type->canonical);
-	return type->type_kind >= TYPE_BOOL && type->type_kind < TYPE_IXX;
+	return type->type_kind >= TYPE_BOOL && type->type_kind <= TYPE_U128;
 }
 
 static inline bool type_is_integer_unsigned(Type *type)
 {
-	assert(type == type->canonical);
-	return type->type_kind >= TYPE_U8 && type->type_kind < TYPE_IXX;
+	TypeKind kind = type->type_kind;
+	if (kind == TYPE_DISTINCT) kind = type->canonical->type_kind;
+	return kind >= TYPE_UINT_FIRST && type->type_kind <= TYPE_UINT_LAST;
 }
 
 static inline bool type_info_poison(TypeInfo *type)
@@ -2111,8 +2103,9 @@ static inline bool type_is_substruct(Type *type)
 
 static inline bool type_is_float(Type *type)
 {
-	assert(type == type->canonical);
-	return type->type_kind >= TYPE_F16 && type->type_kind <= TYPE_FXX;
+	TypeKind kind = type->type_kind;
+	if (kind == TYPE_DISTINCT) kind = type->canonical->type_kind;
+	return kind >= TYPE_FLOAT_FIRST && kind <= TYPE_FLOAT_LAST;
 }
 
 static inline TypeInfo *type_info_new(TypeInfoKind kind, SourceSpan span)
@@ -2229,10 +2222,10 @@ static Type *type_vector_type(Type *type)
 
 static inline bool type_is_builtin(TypeKind kind) { return kind >= TYPE_VOID && kind <= TYPE_TYPEID; }
 static inline bool type_kind_is_signed(TypeKind kind) { return kind >= TYPE_I8 && kind < TYPE_U8; }
-static inline bool type_kind_is_unsigned(TypeKind kind) { return kind >= TYPE_U8 && kind < TYPE_IXX; }
-static inline bool type_kind_is_any_integer(TypeKind kind) { return kind >= TYPE_I8 && kind <= TYPE_IXX; }
+static inline bool type_kind_is_unsigned(TypeKind kind) { return kind >= TYPE_U8 && kind <= TYPE_U128; }
+static inline bool type_kind_is_any_integer(TypeKind kind) { return kind >= TYPE_I8 && kind <= TYPE_U128; }
 static inline bool type_is_signed(Type *type) { return type->type_kind >= TYPE_I8 && type->type_kind < TYPE_U8; }
-static inline bool type_is_unsigned(Type *type) { return type->type_kind >= TYPE_U8 && type->type_kind < TYPE_IXX; }
+static inline bool type_is_unsigned(Type *type) { return type->type_kind >= TYPE_U8 && type->type_kind <= TYPE_U128; }
 static inline bool type_ok(Type *type) { return !type || type->type_kind != TYPE_POISONED; }
 static inline bool type_info_ok(TypeInfo *type_info) { return !type_info || type_info->kind != TYPE_INFO_POISON; }
 
@@ -2241,7 +2234,7 @@ bool type_is_scalar(Type *type);
 static inline bool type_is_numeric(Type *type)
 {
 	TypeKind kind = type->type_kind;
-	return (kind >= TYPE_I8 && kind <= TYPE_FXX) || kind == TYPE_VECTOR;
+	return (kind >= TYPE_I8 && kind <= TYPE_FLOAT_LAST) || kind == TYPE_VECTOR;
 }
 
 static inline bool type_underlying_is_numeric(Type *type)
@@ -2330,7 +2323,7 @@ static inline DeclKind decl_from_token(TokenType type)
 static inline bool type_is_promotable_integer(Type *type)
 {
 	// If we support other architectures, update this.
-	return type_is_integer_kind(type) && type->builtin.bitsize < platform_target.width_c_int;
+	return type_is_integer_or_bool_kind(type) && type->builtin.bitsize < platform_target.width_c_int;
 }
 
 static inline bool type_is_promotable_float(Type *type)

@@ -587,8 +587,6 @@ static inline bool sema_analyse_distinct(Context *context, Decl *decl)
 	switch (base->type_kind)
 	{
 		case TYPE_STRLIT:
-		case TYPE_IXX:
-		case TYPE_FXX:
 		case TYPE_FUNC:
 		case TYPE_TYPEDEF:
 		case TYPE_DISTINCT:
@@ -609,9 +607,8 @@ static inline bool sema_analyse_distinct(Context *context, Decl *decl)
 		case TYPE_TYPEID:
 			SEMA_ERROR(decl, "Cannot create a distinct type from %s.", type_quoted_error_string(base));
 		case TYPE_BOOL:
-		case ALL_SIGNED_INTS:
-		case ALL_UNSIGNED_INTS:
-		case ALL_REAL_FLOATS:
+		case ALL_INTS:
+		case ALL_FLOATS:
 		case TYPE_POINTER:
 		case TYPE_ENUM:
 		case TYPE_BITSTRUCT:
@@ -670,10 +667,12 @@ static inline bool sema_analyse_enum(Context *context, Decl *decl)
 			expr = expr_new(EXPR_CONST, source_span_from_token_id(enum_value->name_token));
 			expr_set_type(expr, type);
 			expr->resolve_status = RESOLVE_NOT_DONE;
+			REMINDER("Do range check");
 			bigint_init_bigint(&expr->const_expr.i, &value);
-			expr->const_expr.int_type = TYPE_IXX;
+			expr->const_expr.int_type = canonical->type_kind;
 			expr->const_expr.const_kind = CONST_INTEGER;
-			expr_set_type(expr, type_compint);
+			expr->const_expr.narrowable = true;
+			expr_set_type(expr, canonical);
 			enum_value->enum_constant.expr = expr;
 		}
 
@@ -898,7 +897,7 @@ AttributeType sema_analyse_attribute(Context *context, Attr *attr, AttributeDoma
 				return ATTRIBUTE_NONE;
 			}
 			if (!sema_analyse_expr(context, type_usize, attr->expr)) return false;
-			if (attr->expr->expr_kind != EXPR_CONST || !type_is_any_integer(attr->expr->type->canonical))
+			if (attr->expr->expr_kind != EXPR_CONST || !type_is_integer(attr->expr->type->canonical))
 			{
 				SEMA_ERROR(attr->expr, "Expected a constant integer value as argument.");
 				return ATTRIBUTE_NONE;

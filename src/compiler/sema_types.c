@@ -25,7 +25,7 @@ bool sema_resolve_array_like_len(Context *context, TypeInfo *type_info, ArrayInd
 		SEMA_ERROR(len_expr, "Expected a constant value as size.");
 		return type_info_poison(type_info);
 	}
-	if (!type_is_any_integer(len_expr->type->canonical))
+	if (!type_is_integer(len_expr->type->canonical))
 	{
 		SEMA_ERROR(len_expr, "Expected an integer size.");
 		return type_info_poison(type_info);
@@ -246,11 +246,6 @@ bool sema_resolve_type_shallow(Context *context, TypeInfo *type_info, bool allow
 			if (!sema_analyse_expr(context, NULL, expr))
 			{
 				return type_info_poison(type_info);
-			}
-			if (!cast_implicitly_to_runtime(expr))
-			{
-				SEMA_ERROR(expr, "The expression does not fit any runtime type.");
-				return false;
 			}
 			type_info->type = expr->type;
 			type_info->resolve_status = RESOLVE_DONE;

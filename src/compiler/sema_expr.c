@@ -82,11 +82,11 @@ static inline bool both_any_integer_or_integer_vector(Expr *left, Expr *right)
 {
 	Type *flatten_left = type_flatten(left->type);
 	Type *flatten_right = type_flatten(right->type);
-	if (type_is_any_integer(flatten_left) && type_is_any_integer(flatten_right)) return true;
+	if (type_is_integer(flatten_left) && type_is_integer(flatten_right)) return true;
 
 	if (flatten_left->type_kind != TYPE_VECTOR || flatten_right->type_kind != TYPE_VECTOR) return false;
 
-	return type_is_any_integer(flatten_left->vector.base) && type_is_any_integer(flatten_right->vector.base);
+	return type_is_integer(flatten_left->vector.base) && type_is_integer(flatten_right->vector.base);
 }
 
 void expr_copy_properties(Expr *to, Expr *from)
@@ -612,13 +612,6 @@ static bool expr_cast_to_index(Expr *index)
 {
 	switch (index->type->canonical->type_kind)
 	{
-		case TYPE_IXX:
-			if (!bigint_fits_in_bits(&index->const_expr.i, 64, true))
-			{
-				SEMA_ERROR(index, "The index is out of range, it must fit in a signed 64 bit integer.");
-				return false;
-			}
-			return cast(index, type_iptrdiff);
 		case TYPE_I8:
 		case TYPE_I16:
 		case TYPE_I32:
@@ -970,9 +963,9 @@ static inline bool sema_expr_analyse_intrinsic_fp_invocation(Context *context, E
 	Expr *arg = expr->call_expr.arguments[0];
 	if (!sema_analyse_expr(context, to, arg)) return false;
 	// Convert ints to float comptime float.
-	if (type_is_any_integer(arg->type->canonical))
+	if (type_is_integer(arg->type->canonical))
 	{
-		if (!cast_implicit(arg, type_compfloat)) return false;
+		if (!cast_implicit(arg, type_double)) return false;
 	}
 	// If this is not a float argument => error.
 	if (!type_is_float(arg->type->canonical))
@@ -980,8 +973,6 @@ static inline bool sema_expr_analyse_intrinsic_fp_invocation(Context *context, E
 		SEMA_ERROR(arg, "Expected a floating point argument.", decl->name);
 		return false;
 	}
-	// We lower to a real float in case we got a compfloat.
-	if (!cast_implicitly_to_runtime(arg)) return false;
 
 	// The expression type is the argument type.
 	expr_set_type(expr, arg->type);
@@ -1344,11 +1335,6 @@ static inline bool sema_expr_analyse_call_invocation(Context *context, Expr *cal
 			case VARDECL_PARAM:
 				// foo
 				if (!sema_analyse_expr_of_required_type(context, param->type, arg, true)) return false;
-				if (!param->type && !cast_implicitly_to_runtime(arg))
-				{
-					SEMA_ERROR(arg, "Constant cannot implicitly be cast to a real type.");
-					return false;
-				}
 				if (callee.macro)
 				{
 					param->alignment = type_abi_alignment(param->type ? param->type : arg->type);
@@ -1784,7 +1770,6 @@ static inline bool sema_expr_analyse_generic_call(Context *context, Type *to, Ex
 		else
 		{
 			if (!sema_analyse_expr(context, NULL, arg)) return false;
-			if (!cast_implicitly_to_runtime(arg)) return false;
 		}
 		scratch_buffer_append_char(',');
 		scratch_buffer_append(arg->type->canonical->name);
@@ -2246,11 +2231,12 @@ static inline bool sema_expr_analyse_group(Context *context, Type *to, Expr *exp
 }
 
 
-static inline void expr_rewrite_to_int_const(Expr *expr_to_rewrite, Type *type, uint64_t value)
+static inline void expr_rewrite_to_int_const(Expr *expr_to_rewrite, Type *type, uint64_t value, bool narrowable)
 {
 	expr_to_rewrite->expr_kind = EXPR_CONST;
 	expr_const_set_int(&expr_to_rewrite->const_expr, value, type->canonical->type_kind);
 	expr_set_type(expr_to_rewrite, type);
+	expr_to_rewrite->const_expr.narrowable = narrowable;
 	expr_to_rewrite->pure = true;
 	expr_to_rewrite->resolve_status = RESOLVE_DONE;
 }
@@ -2455,7 +2441,7 @@ static inline bool sema_expr_analyse_type_access(Context *context, Expr *expr, T
 			}
 			if (name == kw_elements)
 			{
-				expr_rewrite_to_int_const(expr, type_compint, vec_size(decl->enums.values));
+				expr_rewrite_to_int_const(expr, type_isize, vec_size(decl->enums.values), true);
 				return true;
 			}
 			if (name == kw_max)
@@ -2463,7 +2449,7 @@ static inline bool sema_expr_analyse_type_access(Context *context, Expr *expr, T
 				Expr *max = enum_minmax_value(decl, BINARYOP_GT);
 				if (!max)
 				{
-					expr_rewrite_to_int_const(expr, decl->enums.type_info->type->canonical, 0);
+					expr_rewrite_to_int_const(expr, decl->enums.type_info->type->canonical, 0, false);
 					return true;
 				}
 				expr_replace(expr, max);
@@ -2474,7 +2460,7 @@ static inline bool sema_expr_analyse_type_access(Context *context, Expr *expr, T
 				Expr *min = enum_minmax_value(decl, BINARYOP_LT);
 				if (!min)
 				{
-					expr_rewrite_to_int_const(expr, decl->enums.type_info->type->canonical, 0);
+					expr_rewrite_to_int_const(expr, decl->enums.type_info->type->canonical, 0, false);
 					return true;
 				}
 				expr_replace(expr, min);
@@ -2495,7 +2481,7 @@ static inline bool sema_expr_analyse_type_access(Context *context, Expr *expr, T
 			}
 			if (name == kw_elements)
 			{
-				expr_rewrite_to_int_const(expr, type_compint, vec_size(decl->enums.values));
+				expr_rewrite_to_int_const(expr, type_isize, vec_size(decl->enums.values), true);
 				return true;
 			}
 			if (name == kw_max)
@@ -2503,7 +2489,7 @@ static inline bool sema_expr_analyse_type_access(Context *context, Expr *expr, T
 				Expr *max = enum_minmax_value(decl, BINARYOP_GT);
 				if (!max)
 				{
-					expr_rewrite_to_int_const(expr, decl->enums.type_info->type->canonical, 0);
+					expr_rewrite_to_int_const(expr, decl->enums.type_info->type->canonical, 0, false);
 					return true;
 				}
 				expr_replace(expr, max);
@@ -2514,7 +2500,7 @@ static inline bool sema_expr_analyse_type_access(Context *context, Expr *expr, T
 				Expr *min = enum_minmax_value(decl, BINARYOP_LT);
 				if (!min)
 				{
-					expr_rewrite_to_int_const(expr, decl->enums.type_info->type->canonical, 0);
+					expr_rewrite_to_int_const(expr, decl->enums.type_info->type->canonical, 0, false);
 					return true;
 				}
 				expr_replace(expr, min);
@@ -2640,7 +2626,7 @@ CHECK_DEEPER:
 		}
 		if (flat_type->type_kind == TYPE_ARRAY)
 		{
-			expr_rewrite_to_int_const(expr, type_compint, flat_type->array.len);
+			expr_rewrite_to_int_const(expr, type_isize, flat_type->array.len, true);
 			return true;
 		}
 	}
@@ -3777,7 +3763,7 @@ static bool sema_expr_analyse_common_assign(Context *context, Expr *expr, Expr *
 	}
 
 	// 3. If this is only defined for ints (*%, ^= |= &= %=) verify that this is an int.
-	if (int_only && !type_is_any_integer(left->type))
+	if (int_only && !type_is_integer(left->type))
 	{
 		SEMA_ERROR(left, "Expected an integer here.");
 		return false;
@@ -3877,9 +3863,6 @@ static bool sema_expr_analyse_add_sub_assign(Context *context, Expr *expr, Expr 
 	if (left_type_canonical->type_kind == TYPE_POINTER)
 	{
 
-		// 6. Convert any compile time values to runtime
-		if (!cast_implicitly_to_runtime(right)) return false;
-
 		// 7. Finally, check that the right side is indeed an integer.
 		if (!type_is_integer(right->type->canonical))
 		{
@@ -3942,7 +3925,7 @@ static bool sema_check_int_type_fit(Expr *expr, Type *target_type)
 {
 	if (!target_type) return true;
 	Type *type = expr->type->canonical;
-	if (!type_is_any_integer(target_type->canonical) || !type_is_any_integer(type)) return true;
+	if (!type_is_integer(target_type->canonical) || !type_is_integer(type)) return true;
 	if (type_size(type) > type_size(target_type))
 	{
 		SEMA_ERROR(expr, "A '%s' cannot implicitly convert into '%s'.", type_to_error_string(expr->type), type_to_error_string(target_type));
@@ -4026,7 +4009,7 @@ static bool sema_expr_analyse_sub(Context *context, Type *to, Expr *expr, Expr *
 		right_type = right->type->canonical;
 
 		// 4. Check that the right hand side is an integer.
-		if (!type_is_any_integer(right_type))
+		if (!type_is_integer(right_type))
 		{
 			SEMA_ERROR(expr, "Cannot subtract '%s' from '%s'", type_to_error_string(right_type), type_to_error_string(left_type));
 			return false;
@@ -4117,7 +4100,7 @@ static bool sema_expr_analyse_add(Context *context, Type *to, Expr *expr, Expr *
 	if (left_type->type_kind == TYPE_POINTER)
 	{
 		// 3a. Check that the other side is an integer of some sort.
-		if (!type_is_any_integer(right_type))
+		if (!type_is_integer(right_type))
 		{
 			SEMA_ERROR(right, "A value of type '%s' cannot be added to '%s', an integer was expected here.",
 			               type_to_error_string(right->type),
@@ -4402,16 +4385,14 @@ static bool sema_expr_analyse_shift(Context *context, Type *to, Expr *expr, Expr
 	{
 		// 5a. Make sure the value does not exceed the bitsize of
 		//     the left hand side. We ignore this check for lhs being a constant.
-		if (left->type->canonical->type_kind != TYPE_IXX)
+		BigInt bitsize;
+		bigint_init_unsigned(&bitsize, left->type->canonical->builtin.bitsize);
+		if (bigint_cmp(&right->const_expr.i, &bitsize) == CMP_GT)
 		{
-			BigInt bitsize;
-			bigint_init_unsigned(&bitsize, left->type->canonical->builtin.bitsize);
-			if (bigint_cmp(&right->const_expr.i, &bitsize) == CMP_GT)
-			{
-				SEMA_ERROR(right, "The shift exceeds bitsize of '%s'.", type_to_error_string(left->type));
-				return false;
-			}
+			SEMA_ERROR(right, "The shift exceeds bitsize of '%s'.", type_to_error_string(left->type));
+			return false;
 		}
+
 		// 5b. Make sure that the right hand side is positive.
 		if (bigint_cmp_zero(&right->const_expr.i) == CMP_LT)
 		{
@@ -4429,18 +4410,10 @@ static bool sema_expr_analyse_shift(Context *context, Type *to, Expr *expr, Expr
 				bigint_shr(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
 				return true;
 			}
-			// 6b. The << case needs to behave differently for bigints and fixed bit integers.
 			expr_replace(expr, left);
-			if (left->const_expr.int_type == TYPE_IXX)
-			{
-				bigint_shl(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
-			}
-			else
-			{
-				int bit_count = left->type->canonical->builtin.bitsize;
-				bool is_signed = !type_kind_is_unsigned(left->const_expr.int_type);
-				bigint_shl_trunc(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i, bit_count, is_signed);
-			}
+			int bit_count = left->type->canonical->builtin.bitsize;
+			bool is_signed = !type_kind_is_unsigned(left->const_expr.int_type);
+			bigint_shl_trunc(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i, bit_count, is_signed);
 			return true;
 		}
 	}
@@ -4893,15 +4866,10 @@ static bool sema_expr_analyse_bit_not(Context *context, Type *to, Expr *expr, Ex
 	expr_copy_properties(expr, inner);
 
 	Type *canonical = inner->type->canonical;
-	if (canonical->type_kind == TYPE_IXX)
-	{
-		SEMA_ERROR(expr, "Cannot bit negate an untyped integer literal, please first cast it to a concrete type.", type_to_error_string(inner->type));
-		return false;
-	}
-	if (!type_is_any_integer(canonical) && canonical != type_bool)
+	if (!type_is_integer(canonical) && canonical != type_bool)
 	{
 		Type *vector_type = type_vector_type(canonical);
-		if (type_is_any_integer(vector_type) || vector_type == type_bool) goto VALID_VEC;
+		if (type_is_integer(vector_type) || vector_type == type_bool) goto VALID_VEC;
 		SEMA_ERROR(expr, "Cannot bit negate '%s'.", type_to_error_string(inner->type));
 		return false;
 	}
@@ -4928,7 +4896,6 @@ VALID_VEC:
 		case ALL_UNSIGNED_INTS:
 			bigint_not(&expr->const_expr.i, &inner->const_expr.i, canonical->builtin.bitsize, false);
 			break;
-		case TYPE_IXX:
 		default:
 			UNREACHABLE
 	}
@@ -5477,18 +5444,18 @@ static inline bool sema_expr_analyse_placeholder(Context *context, Type *to, Exp
 	}
 	if (string == kw_LINEREAL)
 	{
-		expr_rewrite_to_int_const(expr, type_compint, TOKLOC(expr->placeholder_expr.identifier)->line);
+		expr_rewrite_to_int_const(expr, type_isize, TOKLOC(expr->placeholder_expr.identifier)->line, true);
 		return true;
 	}
 	if (string == kw_LINE)
 	{
 		if (context->macro_scope.depth)
 		{
-			expr_rewrite_to_int_const(expr, type_compint, context->macro_scope.original_inline_line);
+			expr_rewrite_to_int_const(expr, type_isize, context->macro_scope.original_inline_line, true);
 		}
 		else
 		{
-			expr_rewrite_to_int_const(expr, type_compint, TOKLOC(expr->placeholder_expr.identifier)->line);
+			expr_rewrite_to_int_const(expr, type_isize, TOKLOC(expr->placeholder_expr.identifier)->line, true);
 		}
 		return true;
 	}
@@ -5879,7 +5846,7 @@ static inline bool sema_expr_analyse_ct_alignof(Context *context, Type *to, Expr
 		align = type_min_alignment(member->offset, align);
 	}
 
-	expr_rewrite_to_int_const(expr, type_compint, align);
+	expr_rewrite_to_int_const(expr, type_isize, align, true);
 
 	return true;
 }
@@ -5933,7 +5900,7 @@ static inline bool sema_expr_analyse_ct_sizeof(Context *context, Type *to, Expr 
 		type = member->type;
 	}
 
-	expr_rewrite_to_int_const(expr, type_compint, type_size(type));
+	expr_rewrite_to_int_const(expr, type_isize, type_size(type), true);
 	return true;
 }
 
@@ -6270,7 +6237,7 @@ static inline bool sema_expr_analyse_ct_offsetof(Context *context, Type *to, Exp
 		offset += member->offset;
 	}
 
-	expr_rewrite_to_int_const(expr, type_compint, offset);
+	expr_rewrite_to_int_const(expr, type_iptrdiff, offset, true);
 
 	return true;
 }

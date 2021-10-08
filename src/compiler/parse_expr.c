@@ -1208,24 +1208,25 @@ static Expr *parse_char_lit(Context *context, Expr *left)
 {
 	assert(!left && "Had left hand side");
 	Expr *expr_int = EXPR_NEW_TOKEN(EXPR_CONST, context->tok);
+	expr_int->const_expr.narrowable = true;
 	TokenData *data = tokendata_from_id(context->tok.id);
 	switch (data->width)
 	{
 		case 1:
-			expr_const_set_int(&expr_int->const_expr, data->char_lit.u8, TYPE_IXX);
-			expr_set_type(expr_int, type_compint);
+			expr_const_set_int(&expr_int->const_expr, data->char_lit.u8, TYPE_U8);
+			expr_int->type = type_char;
 			break;
 		case 2:
-			expr_const_set_int(&expr_int->const_expr, data->char_lit.u16, TYPE_IXX);
-			expr_set_type(expr_int, type_compint);
+			expr_const_set_int(&expr_int->const_expr, data->char_lit.u16, TYPE_U16);
+			expr_int->type = type_ushort;
 			break;
 		case 4:
-			expr_const_set_int(&expr_int->const_expr, data->char_lit.u32, TYPE_IXX);
-			expr_set_type(expr_int, type_compint);
+			expr_const_set_int(&expr_int->const_expr, data->char_lit.u32, TYPE_U32);
+			expr_int->type = type_uint;
 			break;
 		case 8:
 			expr_const_set_int(&expr_int->const_expr, data->char_lit.u64, TYPE_U64);
-			expr_set_type(expr_int, type_compint);
+			expr_int->type = type_ulong;
 			break;
 		default:
 			UNREACHABLE
@@ -1241,9 +1242,11 @@ static Expr *parse_double(Context *context, Expr *left)
 	assert(!left && "Had left hand side");
 	Expr *number = EXPR_NEW_TOKEN(EXPR_CONST, context->tok);
 	number->const_expr.f = TOKREAL(context->tok.id);
-	expr_set_type(number, type_compfloat);
-	number->const_expr.float_type = TYPE_FXX;
+	expr_set_type(number, type_double);
+	REMINDER("Allow float with f");
+	number->const_expr.float_type = TYPE_F64;
 	number->const_expr.const_kind = CONST_FLOAT;
+	number->const_expr.narrowable = true;
 	advance(context);
 	return number;
 }

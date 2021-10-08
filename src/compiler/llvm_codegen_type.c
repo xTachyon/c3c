@@ -329,7 +329,6 @@ LLVMTypeRef llvm_get_type(GenContext *c, Type *any_type)
 		case TYPE_VOID:
 			return any_type->backend_type = LLVMVoidTypeInContext(c->context);
 		case TYPE_F64:
-		case TYPE_FXX:
 			return any_type->backend_type = LLVMDoubleTypeInContext(c->context);
 		case TYPE_F16:
 			return any_type->backend_type = LLVMHalfTypeInContext(c->context);
@@ -340,8 +339,6 @@ LLVMTypeRef llvm_get_type(GenContext *c, Type *any_type)
 		case ALL_SIGNED_INTS:
 		case ALL_UNSIGNED_INTS:
 			return any_type->backend_type = LLVMIntTypeInContext(c->context, any_type->builtin.bitsize);
-		case TYPE_IXX:
-			return any_type->backend_type = LLVMIntTypeInContext(c->context, 32U);
 		case TYPE_BOOL:
 			return any_type->backend_type = LLVMIntTypeInContext(c->context, 8U);
 		case TYPE_POINTER:

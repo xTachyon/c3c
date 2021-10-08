@@ -384,7 +384,7 @@ static bool x86_try_put_primitive_in_reg(CallABI call, Regs *regs, Type *type)
 		case CALL_X86_VECTOR:
 		case CALL_X86_REG:
 			if (type_size(type) > 4) return false;
-			return type_is_integer_kind(type) || type_is_pointer(type);
+			return type_is_integer_or_bool_kind(type) || type_is_pointer(type);
 		default:
 			return true;
 	}

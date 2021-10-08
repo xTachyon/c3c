@@ -140,7 +140,7 @@ func void main()
     }
     list.free();
 
-    printf("Min %d Max %d Elements: %d\n", MyEnum.min, MyEnum.max, MyEnum.elements);
+    printf("Min %d Max %d Elements: %d\n", MyEnum.min, MyEnum.max, (int)(MyEnum.elements));
 
     int max = MyEnum.max;
     int min = MyEnum.min;

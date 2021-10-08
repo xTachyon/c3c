@@ -168,7 +168,7 @@ bool float_to_integer(Expr *expr, Type *canonical, Type *type)
 	bool is_signed = type_is_unsigned(canonical);
 	if (insert_runtime_cast_unless_const(expr, is_signed ? CAST_FPSI : CAST_FPUI, type)) return true;
 
-	assert(canonical->type_kind >= TYPE_I8 && canonical->type_kind < TYPE_IXX);
+	assert(type_is_integer(canonical));
 	Real d = expr->const_expr.f;
 	BigInt temp;
 	if (is_signed)
@@ -293,8 +293,6 @@ static bool int_to_int(Expr *left, Type *from_canonical, Type *canonical, Type *
 	assert(from_canonical->canonical == from_canonical);
 	switch (from_canonical->type_kind)
 	{
-		case TYPE_IXX:
-			return int_literal_to_int(left, canonical, type);
 		case ALL_SIGNED_INTS:
 			return int_conversion(left, type_is_unsigned(canonical) ? CAST_SIUI : CAST_SISI, canonical, type);
 		case ALL_UNSIGNED_INTS:
@@ -345,45 +343,6 @@ bool enum_to_pointer(Expr* expr, Type *from, Type *type)
 	// TODO can be inlined if enums are constants
 	insert_cast(expr, CAST_ENUMLOW, enum_type_canonical);
 	return int_to_pointer(expr, type);
-}
-
-Type *type_by_expr_range(ExprConst *expr)
-{
-	if (expr->const_kind == CONST_FLOAT && expr->float_type == TYPE_FXX)
-	{
-		return type_double;
-	}
-	assert(expr->const_kind == CONST_INTEGER && expr->int_type == TYPE_IXX);
-	// 1. Does it fit in a C int? If so, that's the type.
-	Type *type = type_cint();
-	if (!expr_const_will_overflow(expr, type->type_kind)) return type;
-
-	int width_max = platform_target.int128 ? 128 : 64;
-	int current_width = platform_target.width_c_int * 2;
-	while (current_width <= width_max)
-	{
-		type = type_int_signed_by_bitsize(current_width);
-		if (!expr_const_will_overflow(expr, type->type_kind)) return type;
-		type = type_int_unsigned_by_bitsize(current_width);
-		if (!expr_const_will_overflow(expr, type->type_kind)) return type;
-		current_width *= width_max;
-	}
-	return NULL;
-}
-
-bool cast_implicitly_to_runtime(Expr *expr)
-{
-	Type *canonical = expr->type->canonical;
-	Type *type;
-	switch (canonical->type_kind)
-	{
-		case TYPE_IXX:
-		case TYPE_FXX:
-			type = type_by_expr_range(&expr->const_expr);
-			return type && cast(expr, type);
-		default:
-			return true;
-	}
 }
 
 
@@ -461,18 +420,17 @@ bool cast_may_explicit(Type *from_type, Type *to_type)
 		case TYPE_ANYERR:
 			// May convert to a bool, an error type or an integer
 			return to == type_bool || to_kind == TYPE_ERRTYPE || type_is_integer(to);
-		case TYPE_IXX:
 		case ALL_SIGNED_INTS:
 		case ALL_UNSIGNED_INTS:
 		case TYPE_ENUM:
 			// Allow conversion int/enum -> float/bool/enum int/enum -> pointer is only allowed if the int/enum is pointer sized.
 			if (type_is_integer(to) || type_is_float(to) || to == type_bool || to_kind == TYPE_ENUM) return true;
 			// TODO think about this, maybe we should require a bitcast?
-			if (to_kind == TYPE_POINTER && (from == type_compint || type_is_pointer_sized(from))) return true;
+			if (to_kind == TYPE_POINTER && type_is_pointer_sized(from)) return true;
 			return false;
 		case ALL_FLOATS:
 			// Allow conversion float -> float/int/bool/enum
-			return type_is_any_integer(to) || type_is_float(to) || to == type_bool || to_kind == TYPE_ENUM;
+			return type_is_integer(to) || type_is_float(to) || to == type_bool || to_kind == TYPE_ENUM;
 		case TYPE_POINTER:
 			// Allow conversion ptr -> int (min pointer size)/bool/pointer/vararray
 			if ((type_is_integer(to) && type_size(to) >= type_size(type_iptr)) || to == type_bool || to_kind == TYPE_POINTER) return true;
@@ -484,7 +442,7 @@ bool cast_may_explicit(Type *from_type, Type *to_type)
 			return to_kind == TYPE_POINTER;
 		case TYPE_ERRTYPE:
 			// Allow MyError.A -> error, to an integer or to bool
-			return to->type_kind == TYPE_ANYERR || type_is_any_integer(to) || to == type_bool;
+			return to->type_kind == TYPE_ANYERR || type_is_integer(to) || to == type_bool;
 		case TYPE_ARRAY:
 			if (to_kind == TYPE_VECTOR)
 			{
@@ -566,7 +524,7 @@ bool cast_may_implicit(Type *from_type, Type *to_type)
 	if (type_is_float(to))
 	{
 		// 2a. Any integer may convert to a float.
-		if (type_is_any_integer(from)) return true;
+		if (type_is_integer(from)) return true;
 
 		// 2b. Any narrower float or FXX may convert to a float.
 		if (type_is_float(from))
@@ -582,9 +540,6 @@ bool cast_may_implicit(Type *from_type, Type *to_type)
 	// 3. Handle ints
 	if (type_is_integer(to))
 	{
-		// TODO, consider size here, and maybe the type should b removed.
-		if (from->type_kind == TYPE_IXX) return true;
-
 		// For an enum, lower to the underlying enum type.
 		if (from->type_kind == TYPE_ENUM)
 		{
@@ -656,7 +611,7 @@ bool cast_may_implicit(Type *from_type, Type *to_type)
 	// 7. In the case of distinct types, we allow implicit conversion from literal types.
 	if (to->type_kind == TYPE_DISTINCT)
 	{
-		if (from->type_kind == TYPE_STRLIT || from->type_kind == TYPE_FXX || from->type_kind == TYPE_IXX)
+		if (from->type_kind == TYPE_STRLIT)
 		{
 			return cast_may_implicit(from, type_flatten(to));
 		}
@@ -726,6 +681,33 @@ bool may_convert_float_const_implicit(Expr *expr, Type *to_type)
 	return true;
 }
 
+bool float_const_fits_type(Expr *expr, Type *to_type)
+{
+	Type *to_type_flat = type_flatten(to_type);
+	Real hi_limit;
+	Real lo_limit;
+	switch (to_type_flat->type_kind)
+	{
+		case TYPE_F16:
+			lo_limit = hi_limit = FLOAT16_LIMIT;
+			break;
+		case TYPE_F32:
+			lo_limit = hi_limit = FLOAT32_LIMIT;
+			break;
+		case TYPE_F64:
+			lo_limit = hi_limit = FLOAT64_LIMIT;
+			break;
+		case TYPE_F128:
+			// Assume this to be true
+			return true;
+		case TYPE_BOOL:
+			return true;
+		default:
+			UNREACHABLE
+	}
+	return expr->const_expr.f >= -lo_limit && expr->const_expr.f <= hi_limit;
+}
+
 bool may_convert_int_const_implicit(Expr *expr, Type *to_type)
 {
 	Type *to_type_flat = type_flatten(to_type);
@@ -737,19 +719,158 @@ bool may_convert_int_const_implicit(Expr *expr, Type *to_type)
 	return true;
 }
 
-bool may_convert_const_implicit(Expr *expr, Type *to_type)
+Expr *recursive_may_narrow_float(Expr *expr, Type *type)
 {
-	switch (expr->type->canonical->type_kind)
+	switch (expr->expr_kind)
 	{
-		case TYPE_FXX:
-			return may_convert_float_const_implicit(expr, to_type);
-		case TYPE_IXX:
-			return may_convert_int_const_implicit(expr, to_type);
-		default:
+		case EXPR_BINARY:
+			switch (expr->binary_expr.operator)
+			{
+				case BINARYOP_ERROR:
+					UNREACHABLE
+				case BINARYOP_MULT:
+				case BINARYOP_SUB:
+				case BINARYOP_ADD:
+				case BINARYOP_DIV:
+				case BINARYOP_MOD:
+				{
+					Expr *res = recursive_may_narrow_float(expr->binary_expr.left, type);
+					if (res) return res;
+					return recursive_may_narrow_float(expr->binary_expr.right, type);
+				}
+				case BINARYOP_BIT_OR:
+				case BINARYOP_BIT_XOR:
+				case BINARYOP_BIT_AND:
+				case BINARYOP_AND:
+				case BINARYOP_OR:
+				case BINARYOP_GT:
+				case BINARYOP_GE:
+				case BINARYOP_LT:
+				case BINARYOP_LE:
+				case BINARYOP_NE:
+				case BINARYOP_EQ:
+				case BINARYOP_SHR:
+				case BINARYOP_SHL:
+				case BINARYOP_BIT_AND_ASSIGN:
+				case BINARYOP_BIT_OR_ASSIGN:
+				case BINARYOP_BIT_XOR_ASSIGN:
+				case BINARYOP_SHR_ASSIGN:
+				case BINARYOP_SHL_ASSIGN:
+					UNREACHABLE
+				case BINARYOP_ASSIGN:
+				case BINARYOP_ADD_ASSIGN:
+				case BINARYOP_DIV_ASSIGN:
+				case BINARYOP_MOD_ASSIGN:
+				case BINARYOP_MULT_ASSIGN:
+				case BINARYOP_SUB_ASSIGN:
+					return recursive_may_narrow_float(expr->binary_expr.left, type);
+			}
+			break;
+		case EXPR_MACRO_BODY_EXPANSION:
+		case EXPR_CALL:
+		case EXPR_POISONED:
+		case EXPR_ACCESS:
+		case EXPR_CATCH_UNWRAP:
+		case EXPR_COMPOUND_LITERAL:
+		case EXPR_COND:
+		case EXPR_DECL:
+		case EXPR_CT_IDENT:
+		case EXPR_DESIGNATOR:
+		case EXPR_EXPR_BLOCK:
+		case EXPR_MACRO_BLOCK:
+		case EXPR_MACRO_EXPANSION:
+		case EXPR_IDENTIFIER:
+		case EXPR_SLICE_ASSIGN:
+		case EXPR_SLICE:
+		case EXPR_SUBSCRIPT:
+			if (type_size(expr->type) > type_size(type)) return expr;
+			return NULL;
+		case EXPR_ELSE:
+		{
+			Expr *res = recursive_may_narrow_float(expr->else_expr.expr, type);
+			if (res) return res;
+			if (expr->else_expr.is_jump) return NULL;
+			return recursive_may_narrow_float(expr->else_expr.else_expr, type);
+		}
+		case EXPR_EXPRESSION_LIST:
+			return recursive_may_narrow_float(VECLAST(expr->expression_list), type);
+		case EXPR_GROUP:
+			return recursive_may_narrow_float(expr->group_expr, type);
+		case EXPR_GUARD:
+			return recursive_may_narrow_float(expr->guard_expr.inner, type);
+		case EXPR_TERNARY:
+		{
+			Expr *res = recursive_may_narrow_float(expr->ternary_expr.then_expr ? expr->ternary_expr.then_expr
+			                                                                    : expr->ternary_expr.cond, type);
+			if (res) return res;
+			return recursive_may_narrow_float(expr->ternary_expr.else_expr, type);
+		}
+		case EXPR_CAST:
+			if (expr->cast_expr.implicit)
+			{
+				return recursive_may_narrow_float(expr->cast_expr.expr, type);
+			}
+			return type_size(expr->type) > type_size(type) ? expr : NULL;
+		case EXPR_CONST:
+			if (!expr->const_expr.narrowable)
+			{
+				return type_size(expr->type) > type_size(type) ? expr : NULL;
+			}
+			assert(expr->const_expr.const_kind == CONST_FLOAT);
+			if (!float_const_fits_type(expr, type_flatten(type)))
+			{
+				return expr;
+			}
+			return NULL;
+		case EXPR_CONST_IDENTIFIER:
+			return type_size(expr->type) > type_size(type) ? expr : NULL;
+		case EXPR_FAILABLE:
+		case EXPR_HASH_IDENT:
+		case EXPR_FLATPATH:
+		case EXPR_INITIALIZER_LIST:
+		case EXPR_DESIGNATED_INITIALIZER_LIST:
+		case EXPR_PLACEHOLDER:
+		case EXPR_TYPEID:
+		case EXPR_TYPEINFO:
+		case EXPR_TYPEOF:
+		case EXPR_UNDEF:
+		case EXPR_CT_CALL:
+		case EXPR_NOP:
+		case EXPR_LEN:
 			UNREACHABLE
-
+		case EXPR_POST_UNARY:
+			return recursive_may_narrow_float(expr->unary_expr.expr, type);
+		case EXPR_SCOPED_EXPR:
+			return recursive_may_narrow_float(expr->expr_scope.expr, type);
+		case EXPR_TRY:
+			assert(expr->try_expr.is_try);
+			return recursive_may_narrow_float(expr->try_expr.expr, type);
+		case EXPR_TRY_UNWRAP:
+			TODO
+		case EXPR_TRY_UNWRAP_CHAIN:
+			TODO
+		case EXPR_TRY_ASSIGN:
+			return recursive_may_narrow_float(expr->try_assign_expr.expr, type);
+		case EXPR_UNARY:
+		{
+			switch (expr->unary_expr.operator)
+			{
+				case UNARYOP_ERROR:
+				case UNARYOP_DEREF:
+				case UNARYOP_ADDR:
+				case UNARYOP_NOT:
+				case UNARYOP_TADDR:
+					UNREACHABLE
+				case UNARYOP_NEG:
+				case UNARYOP_BITNEG:
+				case UNARYOP_INC:
+				case UNARYOP_DEC:
+					return recursive_may_narrow_float(expr->unary_expr.expr, type);
+			}
+		}
 	}
 }
+
 Expr *recursive_may_narrow_int(Expr *expr, Type *type)
 {
 	switch (expr->expr_kind)
@@ -924,13 +1045,23 @@ bool cast_implicit(Expr *expr, Type *to_type)
 				Expr *problem = recursive_may_narrow_int(expr, to_canonical);
 				if (problem)
 				{
-					SEMA_ERROR(problem, "The value '%s' is out of range for %s.", expr_const_to_error_string(&expr->const_expr),
+					SEMA_ERROR(problem, "The value '%s' is out of range for %s, so you need an explicit cast to truncate the value.", expr_const_to_error_string(&expr->const_expr),
 							   type_quoted_error_string(to_type));
 					return false;
 				}
 				goto OK;
 			}
-			if (type_is_float(expr_flatten) && type_is_float(to_flatten)) goto OK;
+			if (type_is_float(expr_flatten) && type_is_float(to_flatten))
+			{
+				Expr *problem = recursive_may_narrow_float(expr, to_canonical);
+				if (problem)
+				{
+					SEMA_ERROR(problem, "The value '%s' is out of range for %s, so you need an explicit cast to truncate the value.", expr_const_to_error_string(&expr->const_expr),
+							   type_quoted_error_string(to_type));
+					return false;
+				}
+				goto OK;
+			}
 		}
 		if (type_is_integer(expr_canonical) && type_is_integer(to_canonical))
 		{
@@ -946,8 +1077,13 @@ bool cast_implicit(Expr *expr, Type *to_type)
 		}
 		if (type_is_float(expr_canonical) && type_is_float(to_canonical))
 		{
-			assert(type_size(expr_canonical) > type_size(to_canonical));
-			// TODO Recursively check
+			Expr *problem = recursive_may_narrow_float(expr, to_canonical);
+			if (problem)
+			{
+				SEMA_ERROR(problem, "The value '%s' is out of range for %s.", expr_const_to_error_string(&expr->const_expr),
+						   type_quoted_error_string(to_type));
+				return false;
+			}
 			goto OK;
 		}
 		SEMA_ERROR(expr, "Implicitly casting %s to %s is not permitted, but you can do an explicit cast using '(<type>)(value)'.", type_quoted_error_string(expr->type), type_quoted_error_string(to_type));
@@ -956,13 +1092,13 @@ bool cast_implicit(Expr *expr, Type *to_type)
 
 	OK:
 	// Additional checks for compile time values.
-	if (expr->expr_kind == EXPR_CONST)
+	if (expr->expr_kind == EXPR_CONST && expr->const_expr.narrowable)
 	{
-		if (expr->type->type_kind == TYPE_FXX)
+		if (type_is_float(expr->type))
 		{
 			if (!may_convert_float_const_implicit(expr, to_type)) return false;
 		}
-		else if (expr->type->type_kind == TYPE_IXX)
+		else if (type_is_integer(expr->type))
 		{
 			if (!may_convert_int_const_implicit(expr, to_type)) return false;
 		}
@@ -1073,13 +1209,6 @@ bool cast(Expr *expr, Type *to_type)
 			if (canonical->type_kind == TYPE_BOOL) return insert_cast(expr, CAST_EUBOOL, to_type);
 			if (canonical->type_kind == TYPE_ERRTYPE) return insert_cast(expr, CAST_EUER, to_type);
 			if (type_is_integer(canonical)) return insert_cast(expr, CAST_EUINT, to_type);
-			break;
-		case TYPE_IXX:
-			if (type_is_integer(canonical)) return int_literal_to_int(expr, canonical, to_type);
-			if (type_is_float(canonical)) return int_literal_to_float(expr, canonical, to_type);
-			if (canonical == type_bool) return int_literal_to_bool(expr, to_type);
-			if (canonical->type_kind == TYPE_POINTER) return int_to_pointer(expr, to_type);
-			if (canonical->type_kind == TYPE_ENUM) return lit_integer_to_enum(expr, canonical, to_type);
 			break;
 		case ALL_SIGNED_INTS:
 			if (type_is_integer_unsigned(canonical)) return int_conversion(expr, CAST_SIUI, canonical, to_type);

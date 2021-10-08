@@ -501,8 +501,6 @@ bool type_is_homogenous_aggregate(Type *type, Type **base, unsigned *elements)
 		case TYPE_BITSTRUCT:
 			type = type->decl->bitstruct.base_type->type;
 			goto RETRY;
-		case TYPE_FXX:
-		case TYPE_IXX:
 		case TYPE_VOID:
 		case TYPE_TYPEID:
 		case TYPE_FUNC:
@@ -584,7 +582,7 @@ bool type_is_homogenous_aggregate(Type *type, Type **base, unsigned *elements)
 			type = type_int_unsigned_by_bitsize(type->builtin.bitsize);
 			break;
 		case ALL_UNSIGNED_INTS:
-		case ALL_REAL_FLOATS:
+		case ALL_FLOATS:
 		case TYPE_VECTOR:
 			break;
 		case TYPE_POINTER:
@@ -1050,9 +1048,8 @@ bool type_is_valid_for_vector(Type *type)
 	RETRY:
 	switch (type->type_kind)
 	{
-		case ALL_SIGNED_INTS:
-		case ALL_UNSIGNED_INTS:
-		case ALL_REAL_FLOATS:
+		case ALL_INTS:
+		case ALL_FLOATS:
 		case TYPE_BOOL:
 			return true;
 		case TYPE_TYPEDEF:
@@ -1168,8 +1165,6 @@ static void type_append_name_to_scratch(Type *type)
 		case TYPE_VECTOR:
 			scratch_buffer_append(type->name);
 			break;
-		case TYPE_IXX:
-		case TYPE_FXX:
 		case TYPE_STRLIT:
 		case TYPE_UNTYPED_LIST:
 		case TYPE_INFERRED_ARRAY:
@@ -1276,8 +1271,6 @@ void type_setup(PlatformTarget *target)
 	type_init("virtual*", &t.virtual, TYPE_VIRTUAL_ANY, target->width_pointer * 2, target->align_pointer);
 	type_init("virtual_generic", &t.virtual_generic, TYPE_VIRTUAL, target->width_pointer * 2, target->align_pointer);
 
-	type_create("compint", &t.ixx, TYPE_IXX, 1, 1, 1);
-	type_create("compfloat", &t.fxx, TYPE_FXX, 1, 1, 1);
 
 	type_create_alias("usize", &t.usz, type_int_unsigned_by_bitsize(target->width_pointer));
 	type_create_alias("isize", &t.isz, type_int_signed_by_bitsize(target->width_pointer));
@@ -1476,15 +1469,13 @@ Type *type_find_max_num_type(Type *num_type, Type *other_num)
 	assert(kind != other_kind);
 
 	// 1. The only conversions need to happen if the other type is a number.
-	if (other_kind < TYPE_I8 || other_kind > TYPE_FXX) return NULL;
+	if (other_kind < TYPE_INTEGER_FIRST || other_kind > TYPE_FLOAT_LAST) return NULL;
 
 	// 2. First check the float case.
-	if (other_kind >= TYPE_F16 && other_kind <= TYPE_FXX)
+	if (other_kind >= TYPE_FLOAT_FIRST && other_kind <= TYPE_FLOAT_LAST)
 	{
 		switch (other_kind)
 		{
-			case TYPE_FXX:
-				return kind <= TYPE_IXX ? type_double : num_type;
 			case TYPE_F16:
 			case TYPE_F32:
 			case TYPE_F64:
@@ -1498,9 +1489,6 @@ Type *type_find_max_num_type(Type *num_type, Type *other_num)
 
 	// Handle integer <=> integer conversions.
 	assert(type_kind_is_any_integer(other_kind) && type_is_integer(num_type));
-
-	// 3. If the other type is IXX, return the current type.
-	if (other_kind == TYPE_IXX) return num_type;
 
 	// 4. Check the bit sizes.
 	unsigned other_bit_size = other_num->builtin.bitsize;
@@ -1598,17 +1586,12 @@ Type *type_find_max_type(Type *type, Type *other)
 		case TYPE_VIRTUAL_ANY:
 		case TYPE_BITSTRUCT:
 			return NULL;
-		case TYPE_IXX:
-			FALLTHROUGH;
-		case ALL_SIGNED_INTS:
-		case ALL_UNSIGNED_INTS:
+		case ALL_INTS:
 			if (other->type_kind == TYPE_DISTINCT && type_underlying_is_numeric(other)) return other;
 			if (other->type_kind == TYPE_ENUM) return type_find_max_type(type, other->decl->enums.type_info->type->canonical);
 			return type_find_max_num_type(type, other);
-		case TYPE_FXX:
+		case ALL_FLOATS:
 			if (other->type_kind == TYPE_DISTINCT && type_is_float(other->decl->distinct_decl.base_type)) return other;
-			FALLTHROUGH;
-		case ALL_REAL_FLOATS:
 			return type_find_max_num_type(type, other);
 		case TYPE_POINTER:
 			return type_find_max_ptr_type(type, other);

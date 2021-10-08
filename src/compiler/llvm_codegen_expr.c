@@ -1474,7 +1474,7 @@ static void llvm_emit_trap_zero(GenContext *c, Type *type, LLVMValueRef value, c
 	if (!active_target.feature.safe_mode) return;
 
 	LLVMValueRef zero = llvm_get_zero(c, type);
-	LLVMValueRef ok = type_is_any_integer(type) ? LLVMBuildICmp(c->builder, LLVMIntEQ, value, zero, "zero") : LLVMBuildFCmp(c->builder, LLVMRealUEQ, value, zero, "zero");
+	LLVMValueRef ok = type_is_integer(type) ? LLVMBuildICmp(c->builder, LLVMIntEQ, value, zero, "zero") : LLVMBuildFCmp(c->builder, LLVMRealUEQ, value, zero, "zero");
 	llvm_emit_panic_on_true(c, ok, error, loc);
 }
 
@@ -3013,8 +3013,6 @@ static void llvm_expand_type_to_args(GenContext *context, Type *param_type, LLVM
 	switch (type_lowering(param_type)->type_kind)
 	{
 		case TYPE_VOID:
-		case TYPE_IXX:
-		case TYPE_FXX:
 		case TYPE_TYPEID:
 		case TYPE_FUNC:
 		case TYPE_DISTINCT:
@@ -3027,9 +3025,8 @@ static void llvm_expand_type_to_args(GenContext *context, Type *param_type, LLVM
 			UNREACHABLE
 			break;
 		case TYPE_BOOL:
-		case ALL_SIGNED_INTS:
-		case ALL_UNSIGNED_INTS:
-		case ALL_REAL_FLOATS:
+		case ALL_INTS:
+		case ALL_FLOATS:
 		case TYPE_POINTER:
 			vec_add(*values, LLVMBuildLoad2(context->builder, llvm_get_type(context, param_type), expand_ptr, "loadexpanded"));
 			return;

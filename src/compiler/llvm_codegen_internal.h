@@ -411,7 +411,7 @@ static inline LLVMValueRef llvm_get_zero(GenContext *c, Type *type)
 static inline LLVMValueRef llvm_const_int(GenContext *c, Type *type, uint64_t val)
 {
 	type = type_lowering(type);
-	assert(type_is_any_integer(type) || type->type_kind == TYPE_BOOL);
+	assert(type_is_integer(type) || type->type_kind == TYPE_BOOL);
 	return LLVMConstInt(llvm_get_type(c, type), val, type_is_integer_signed(type));
 }
 

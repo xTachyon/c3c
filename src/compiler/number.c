@@ -208,11 +208,9 @@ bool expr_const_will_overflow(const ExprConst *expr, TypeKind kind)
 			return expr->i.is_negative || !bigint_fits_in_bits(&expr->i, 64, false);
 		case TYPE_F16:
 			return !bigint_fits_in_bits(&expr->i, 17, false);
-		case TYPE_IXX:
 		case TYPE_F32:
 		case TYPE_F64:
 		case TYPE_F128:
-		case TYPE_FXX:
 		case TYPE_BOOL:
 			return false;
 		default:

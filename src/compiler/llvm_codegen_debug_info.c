@@ -481,8 +481,6 @@ static inline LLVMMetadataRef llvm_get_debug_type_internal(GenContext *c, Type *
 	// Consider special handling of UTF8 arrays.
 	switch (type->type_kind)
 	{
-		case TYPE_IXX:
-		case TYPE_FXX:
 		case TYPE_TYPEID:
 		case TYPE_STRLIT:
 		case CT_TYPES:

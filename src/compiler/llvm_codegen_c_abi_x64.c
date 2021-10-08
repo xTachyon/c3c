@@ -395,8 +395,6 @@ static void x64_classify(Type *type, ByteSize offset_base, X64Class *lo_class, X
 	{
 		case TYPE_ENUM:
 		case TYPE_TYPEDEF:
-		case TYPE_FXX:
-		case TYPE_IXX:
 		case TYPE_TYPEID:
 		case TYPE_FUNC:
 		case TYPE_DISTINCT:
@@ -589,8 +587,6 @@ AbiType *x64_get_int_type_at_offset(Type *type, unsigned offset, Type *source_ty
 			return x64_get_int_type_at_offset(element, offset - element_offset, source_type, source_offset);
 		}
 		case TYPE_VOID:
-		case TYPE_FXX:
-		case TYPE_IXX:
 		case TYPE_TYPEID:
 		case TYPE_ENUM:
 		case TYPE_FUNC:

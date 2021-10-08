@@ -1730,7 +1730,7 @@ static bool sema_analyse_case_expr(Context *context, Type* to_type, Ast *case_st
 
 	// 4. Otherwise check if we have an enum receiving type and a number on
 	//    in the case. In that case we do an implicit conversion.
-	if (to_type_canonical->type_kind == TYPE_ENUM && type_is_any_integer(case_type))
+	if (to_type_canonical->type_kind == TYPE_ENUM && type_is_integer(case_type))
 	{
 		return cast(case_expr, to_type);
 	}
@@ -1810,7 +1810,7 @@ static bool sema_analyse_switch_body(Context *context, Ast *statement, SourceSpa
 		return false;
 	}
 	// We need an if chain if this isn't an integer type.
-	bool if_chain = !type_is_any_integer(type_flatten(switch_type));
+	bool if_chain = !type_is_integer(type_flatten(switch_type));
 
 	Ast *default_case = NULL;
 	assert(context->active_scope.defer_start == context->active_scope.defer_last);
