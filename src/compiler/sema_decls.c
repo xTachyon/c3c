@@ -497,7 +497,7 @@ static inline bool sema_analyse_function_param(Context *context, Decl *param, bo
 	if (param->var.init_expr)
 	{
 		Expr *expr = param->var.init_expr;
-		if (!sema_analyse_expr_of_required_type(context, param->type, expr, false)) return false;
+		if (!sema_analyse_assigned_expr(context, param->type, expr, false)) return false;
 		Expr *inner = expr;
 		while (inner->expr_kind == EXPR_CAST) inner = expr->cast_expr.expr;
 		if (inner->expr_kind != EXPR_CONST)
@@ -1390,7 +1390,7 @@ bool sema_analyse_var_decl(Context *context, Decl *decl)
 		Expr *init_expr = decl->var.init_expr;
 
 		// 1. Check type.
-		if (!sema_analyse_expr_of_required_type(context, decl->type, init_expr, false)) return false;
+		if (!sema_analyse_assigned_expr(context, decl->type, init_expr, false)) return false;
 
 		// 2. Check const-ness
 		if ((is_global || decl->var.is_static) && !expr_is_constant_eval(init_expr, CONSTANT_EVAL_ANY))

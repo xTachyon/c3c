@@ -1879,6 +1879,8 @@ bool sema_unwrap_var(Context *context, Decl *decl);
 bool sema_rewrap_var(Context *context, Decl *decl);
 bool sema_erase_var(Context *context, Decl *decl);
 bool sema_erase_unwrapped(Context *context, Decl *decl);
+bool sema_analyse_cond_expr(Context *context, Expr *expr);
+bool sema_analyse_assigned_expr(Context *context, Type *to, Expr *expr, bool may_be_failable);
 bool sema_analyse_expr_of_required_type(Context *context, Type *to, Expr *expr, bool may_be_failable);
 ArrayIndex sema_get_initializer_const_array_size(Context *context, Expr *initializer, bool *may_be_array, bool *is_const_size);
 bool sema_analyse_expr(Context *context, Type *to, Expr *expr);
@@ -1887,7 +1889,8 @@ bool sema_analyse_var_decl(Context *context, Decl *decl);
 bool sema_analyse_ct_assert_stmt(Context *context, Ast *statement);
 bool sema_analyse_statement(Context *context, Ast *statement);
 bool sema_expr_analyse_assign_right_side(Context *context, Expr *expr, Type *left_type, Expr *right, ExprFailableStatus lhs_is_failable);
-bool sema_expr_analyse_general_call(Context *context, Type *to, Expr *expr, Decl *decl, Expr *struct_var, bool is_macro);
+
+bool sema_expr_analyse_general_call(Context *context, Expr *expr, Decl *decl, Expr *struct_var, bool is_macro);
 Decl *sema_resolve_symbol_in_current_dynamic_scope(Context *context, const char *symbol);
 Decl *sema_resolve_parameterized_symbol(Context *context, TokenId symbol, Path *path);
 Decl *sema_resolve_method(Context *context, Decl *type, const char *method_name, Decl **ambiguous_ref, Decl **private_ref);

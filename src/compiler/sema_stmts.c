@@ -54,9 +54,12 @@ static inline bool sema_analyse_block_return_stmt(Context *context, Ast *stateme
 	context->active_scope.jump_end = true;
 	if (statement->return_stmt.expr)
 	{
-		if (!sema_analyse_expr_of_required_type(context,
-	                                           context->expected_block_type,
-	                                           statement->return_stmt.expr, true)) return false;
+		if (!sema_analyse_assigned_expr(context,
+		                                context->expected_block_type,
+		                                statement->return_stmt.expr, true))
+		{
+			return false;
+		}
 		context->expr_failable_return |= statement->return_stmt.expr->failable;
 	}
 	vec_add(context->returns, statement);
@@ -269,7 +272,7 @@ static inline bool sema_analyse_try_unwrap_chain(Context *context, Expr *expr)
 			if (!sema_analyse_try_unwrap(context, chain)) return false;
 			continue;
 		}
-		if (!sema_analyse_expr_of_required_type(context, type_bool, chain, false)) return false;
+		if (!sema_analyse_cond_expr(context, chain)) return false;
 	}
 	expr_set_type(expr, type_bool);
 	expr->resolve_status = RESOLVE_DONE;
@@ -618,7 +621,7 @@ static inline bool sema_analyse_do_stmt(Context *context, Ast *statement)
 	SCOPE_START
 
 		// 10. Try to evaluate and implicitly cast to boolean.
-		if (!sema_analyse_expr_of_required_type(context, type_bool, expr, false))
+		if (!sema_analyse_cond_expr(context, expr))
 		{
 			// 10a. On failure, pop and return false.
 			return SCOPE_POP_ERROR();
@@ -860,7 +863,7 @@ static inline bool sema_analyse_for_stmt(Context *context, Ast *statement)
 			// Conditional scope start
 			SCOPE_START
 				Expr *cond = statement->for_stmt.cond;
-				success = sema_analyse_expr_of_required_type(context, type_bool, cond, false);
+				success = sema_analyse_cond_expr(context, cond);
 				statement->for_stmt.cond = context_pop_defers_and_wrap_expr(context, cond);
 				// If this is const true, then set this to infinite and remove the expression.
 				if (statement->for_stmt.cond->expr_kind == EXPR_CONST && statement->for_stmt.cond->const_expr.b)
@@ -919,7 +922,7 @@ static inline bool sema_inline_default_iterator(Context *context, Expr *expr, De
 	expr->call_expr = (ExprCall) {
 		.is_type_method = true,
 	};
-	return sema_expr_analyse_general_call(context, NULL, expr, decl, inner, decl->decl_kind == DECL_MACRO);
+	return sema_expr_analyse_general_call(context, expr, decl, inner, decl->decl_kind == DECL_MACRO);
 }
 
 static Decl *find_iterator(Context *context, Expr *enumerator)
@@ -1101,7 +1104,11 @@ static bool sema_rewrite_foreach_to_for(Context *context, Ast *statement, Expr *
 	Expr *iterator_access = expr_variable(iterator);
 	expr_insert_addr(iterator_access);
 
-	if (!sema_expr_analyse_general_call(context, NULL, call, next_method, iterator_access, next_method->decl_kind == DECL_MACRO)) return false;
+	if (!sema_expr_analyse_general_call(context,
+	                                    call,
+	                                    next_method,
+	                                    iterator_access,
+	                                    next_method->decl_kind == DECL_MACRO)) return false;
 	call->resolve_status = RESOLVE_DONE;
 
 	statement->for_stmt = (AstForStmt){ .init = init_expr,
@@ -2061,7 +2068,7 @@ bool sema_analyse_assert_stmt(Context *context, Ast *statement)
 	}
 	else
 	{
-		if (!sema_analyse_expr_of_required_type(context, type_bool, expr, false)) return false;
+		if (!sema_analyse_assigned_expr(context, type_bool, expr, false)) return false;
 	}
 	return true;
 }
@@ -2219,7 +2226,7 @@ static bool sema_analyse_requires(Context *context, Ast *docs, Ast ***asserts)
 				SEMA_ERROR(expr, "Only expressions are allowed.");
 				return false;
 			}
-			if (!sema_analyse_expr_of_required_type(context, type_bool, expr, false)) return false;
+			if (!sema_analyse_cond_expr(context, expr)) return false;
 			Ast *assert = new_ast(AST_ASSERT_STMT, expr->span);
 			assert->assert_stmt.expr = expr;
 			assert->assert_stmt.message = comment;
