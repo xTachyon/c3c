@@ -1,9 +1,9 @@
 module fasta;
 
-const IM = 139968;
-const IA = 3877;
-const IC = 29573;
-const SEED = 42;
+const IM = 139968u;
+const IA = 3877u;
+const IC = 29573u;
+const SEED = 42u;
 
 uint seed = SEED;
 
@@ -108,10 +108,10 @@ func void main(int argc, char **argv)
 %"char[]" = type { i8*, i64 }
 %"double[]" = type { double*, i64 }
 
-@fasta.IM = constant i32 139968, align 1
-@fasta.IA = constant i32 3877, align 1
-@fasta.IC = constant i32 29573, align 1
-@fasta.SEED = constant i32 42, align 1
+@fasta.IM = constant i32 139968, align 4
+@fasta.IA = constant i32 3877, align 4
+@fasta.IC = constant i32 29573, align 4
+@fasta.SEED = constant i32 42, align 4
 @fasta.seed = global i32 42, align 4
 @.str = private constant [288 x i8] c"GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAGGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCGCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA\00", align 1
 @fasta.alu = protected global %"char[]" { i8* getelementptr inbounds ([288 x i8], [288 x i8]* @.str, i32 0, i32 0), i64 287 }, align 8
@@ -123,7 +123,7 @@ func void main(int argc, char **argv)
 @fasta.homosapiens = global %"char[]" { i8* getelementptr inbounds ([5 x i8], [5 x i8]* @.str.12, i32 0, i32 0), i64 4 }, align 8
 @.taddr.13 = private hidden global [4 x double] [double 0x3FD3639D20BAEB5B, double 0x3FC957AE3DCD561B, double 0x3FC9493AEAB6C2BF, double 0x3FD34BEE4B030838], align 8
 @fasta.homosapiens_p = global %"double[]" { double* getelementptr inbounds ([4 x double], [4 x double]* @.taddr.13, i32 0, i32 0), i64 4 }, align 8
-@fasta.LINELEN = constant i32 60, align 1
+@fasta.LINELEN = constant i32 60, align 4
 @.str.14 = private constant [23 x i8] c">ONE Homo sapiens alu\0A\00", align 1
 @.str.15 = private constant [26 x i8] c">TWO IUB ambiguity codes\0A\00", align 1
 @.str.16 = private constant [31 x i8] c">THREE Homo sapiens frequency\0A\00", align 1

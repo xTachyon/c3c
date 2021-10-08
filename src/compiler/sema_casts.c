@@ -35,6 +35,7 @@ bool pointer_to_integer(Expr *expr, Type *type)
 	// Must have been a null
 	expr_const_set_int(&expr->const_expr, 0, TYPE_POINTER);
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -45,6 +46,7 @@ bool pointer_to_bool(Expr *expr, Type *type)
 	// Must have been a null
 	expr->const_expr.b = false;
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -55,6 +57,7 @@ bool pointer_to_pointer(Expr* expr, Type *type)
 
 	// Must have been a null
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -85,6 +88,7 @@ static void const_int_to_fp_cast(Expr *expr, Type *canonical, Type *type)
 	expr_set_type(expr, type);
 	expr->const_expr.float_type = canonical->type_kind;
 	expr->const_expr.const_kind = CONST_FLOAT;
+	expr->const_expr.narrowable = false;
 }
 
 
@@ -96,6 +100,7 @@ bool bool_to_int(Expr *expr, Type *canonical, Type *type)
 	if (insert_runtime_cast_unless_const(expr, CAST_BOOLINT, type)) return true;
 	expr_const_set_int(&expr->const_expr, expr->const_expr.b ? 1 : 0, canonical->type_kind);
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -110,6 +115,7 @@ bool bool_to_float(Expr *expr, Type *canonical, Type *type)
 	assert(expr->const_expr.const_kind == CONST_BOOL);
 	expr_const_set_float(&expr->const_expr, expr->const_expr.b ? 1.0 : 0.0, canonical->type_kind);
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -123,6 +129,7 @@ bool integer_to_bool(Expr *expr, Type *type)
 
 	expr_const_set_bool(&expr->const_expr, bigint_cmp_zero(&expr->const_expr.i) != CMP_EQ);
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -135,6 +142,7 @@ bool float_to_bool(Expr *expr, Type *type)
 
 	expr_const_set_bool(&expr->const_expr, expr->const_expr.f != 0.0);
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -148,6 +156,7 @@ static bool float_to_float(Expr* expr, Type *canonical, Type *type)
 
 	expr_const_set_float(&expr->const_expr, expr->const_expr.f, canonical->type_kind);
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -175,6 +184,7 @@ bool float_to_integer(Expr *expr, Type *canonical, Type *type)
 	expr->const_expr.int_type = canonical->type_kind;
 	expr->const_expr.const_kind = CONST_INTEGER;
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -197,6 +207,7 @@ static bool int_literal_to_int(Expr *expr, Type *canonical, Type *type)
 	expr->const_expr.int_type = canonical->type_kind;
 	assert(expr->const_expr.const_kind == CONST_INTEGER);
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -221,6 +232,7 @@ static bool int_conversion(Expr *expr, CastKind kind, Type *canonical, Type *typ
 	expr->const_expr.int_type = canonical->type_kind;
 	expr->const_expr.const_kind = CONST_INTEGER;
 	expr_set_type(expr, type);
+	expr->const_expr.narrowable = false;
 	return true;
 }
 
@@ -251,6 +263,7 @@ static bool int_literal_to_bool(Expr *expr, Type *type)
 {
 	assert(expr->expr_kind == EXPR_CONST);
 	expr_const_set_bool(&expr->const_expr, bigint_cmp_zero(&expr->const_expr.i) != CMP_EQ);
+	expr->const_expr.narrowable = false;
 	expr_set_type(expr, type);
 	return true;
 }
@@ -902,7 +915,7 @@ bool cast_implicit(Expr *expr, Type *to_type)
 			SEMA_ERROR(expr, "You cannot cast %s into %s even with an explicit cast, so this looks like an error.", type_quoted_error_string(expr->type), type_quoted_error_string(to_type));
 			return false;
 		}
-		if (expr->expr_kind == EXPR_CONST)
+		if (expr->expr_kind == EXPR_CONST && expr->const_expr.narrowable)
 		{
 			Type *expr_flatten = type_flatten_distinct(expr_canonical);
 			Type *to_flatten = type_flatten_distinct(to_canonical);
@@ -1037,6 +1050,7 @@ bool cast(Expr *expr, Type *to_type)
 	if (from_type == canonical)
 	{
 		expr_set_type(expr, to_type);
+		if (expr->expr_kind == EXPR_CONST) expr->const_expr.narrowable = false;
 		return true;
 	}
 	switch (from_type->type_kind)

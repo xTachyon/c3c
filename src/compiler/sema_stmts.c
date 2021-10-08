@@ -711,7 +711,7 @@ bool sema_analyse_local_decl(Context *context, Decl *decl)
 			SEMA_ERROR(decl->var.init_expr, "A failable expression was expected here.");
 			return decl_poison(decl);
 		}
-
+		if (init->expr_kind == EXPR_CONST) init->const_expr.narrowable = false;
 	}
 	EXIT_OK:
 	if (decl->var.is_static)

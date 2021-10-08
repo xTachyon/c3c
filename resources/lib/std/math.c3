@@ -107,13 +107,13 @@ func double log10(double x)
 	hx += 0x3ff00000 - 0x3fe6a09e;
 	k += (int)(hx >> 20) - 0x3ff;
 	hx = (hx & 0x000fffff) + 0x3fe6a09e;
-	u.i = (ulong)(hx << 32) | (u.i & 0xffffffff);
+	u.i = (ulong)(hx << 32) | (u.i & 0xffffffffu64);
 	x = u.f;
 
 	hx += 0x3ff00000 - 0x3fe6a09e;
 	k += (int)(hx >> 20) - 0x3ff;
 	hx = (hx & 0x000fffff) + 0x3fe6a09e;
-	u.i = (ulong)(hx << 32) | (u.i & 0xffffffff);
+	u.i = (ulong)(hx << 32) | (u.i & 0xffffffffu64);
 	x = u.f;
 
 
@@ -131,7 +131,7 @@ func double log10(double x)
 	double hi = f - hfsq;
 	u.f = hi;
 	// u.i &= (ulong)(-1) << 32;
-	u.i &= 0xFFFFFFFF00000000;
+	u.i &= 0xFFFFFFFF00000000u64;
 	hi = u.f;
 	double lo = f - hi - hfsq + s * (hfsq + r);
 

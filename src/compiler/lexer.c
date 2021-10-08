@@ -352,6 +352,36 @@ static inline bool scan_ident(Lexer *lexer, TokenType normal, TokenType const_to
 
 #pragma mark --- Number scanning
 
+static bool scan_number_suffix(Lexer *lexer, bool *is_float)
+{
+	if (!is_alphanum_(peek(lexer))) return true;
+	switch (peek(lexer))
+	{
+		case 'u':
+		case 'U':
+		case 'I':
+		case 'i':
+			if (*is_float)
+			{
+				return add_error_token(lexer, "Integer suffix '%x' is not valid for a floating point literal.", peek(lexer));
+			}
+			next(lexer);
+			while (is_number(peek(lexer))) next(lexer);
+			break;
+		case 'f':
+			*is_float = true;
+			next(lexer);
+			while (is_number(peek(lexer))) next(lexer);
+			break;
+		default:
+			break;
+	}
+	if (is_alphanum_(peek(lexer)))
+	{
+		return add_error_token(lexer, "This doesn't seem to be a valid literal.");
+	}
+	return true;
+}
 /**
  * Parsing octals. Here we depart from the (error prone) C style octals with initial zero e.g. 0231
  * Instead we only support 0o prefix like 0o231. Note that lexing here doesn't actually parse the
@@ -362,7 +392,9 @@ static bool scan_oct(Lexer *lexer)
 	char o = next(lexer); // Skip the o
 	if (!is_oct(next(lexer))) return add_error_token(lexer, "An expression starting with '0%c' would expect to be followed by octal numbers (0-7).", o);
 	while (is_oct_or_(peek(lexer))) next(lexer);
-	return add_token(lexer, TOKEN_INTEGER, lexer->lexing_start);
+	bool is_float = false;
+	if (!scan_number_suffix(lexer, &is_float)) return false;
+	return add_token(lexer, is_float ? TOKEN_FLOAT : TOKEN_INTEGER, lexer->lexing_start);
 }
 
 /**
@@ -377,7 +409,9 @@ static bool scan_binary(Lexer *lexer)
 		                   "did you try to write a hex value but forgot the '0x'?");
 	}
 	while (is_binary_or_(peek(lexer))) next(lexer);
-	return add_token(lexer, TOKEN_INTEGER, lexer->lexing_start);
+	bool is_float = false;
+	if (!scan_number_suffix(lexer, &is_float)) return false;
+	return add_token(lexer, is_float ? TOKEN_FLOAT : TOKEN_INTEGER, lexer->lexing_start);
 }
 
 /**
@@ -434,6 +468,8 @@ static inline bool scan_hex(Lexer *lexer)
 		if (!scan_exponent(lexer)) return false;
 	}
 	if (prev(lexer) == '_') return add_error_token(lexer, "The number ended with '_', but that character needs to be between, not after, digits.");
+	// TODO this does not currently work.
+	if (!scan_number_suffix(lexer, &is_float)) return false;
 	if (is_float)
 	{
 		// IMPROVE
@@ -502,7 +538,8 @@ static inline bool scan_dec(Lexer *lexer)
 	}
 
 	if (prev(lexer) == '_') return add_error_token(lexer, "The number ended with '_', but that character needs to be between, not after, digits.");
-
+	// TODO this does not currently work.
+	if (!scan_number_suffix(lexer, &is_float)) return false;
 	if (is_float)
 	{
 		// IMPROVE

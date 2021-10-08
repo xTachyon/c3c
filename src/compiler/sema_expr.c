@@ -687,19 +687,6 @@ static inline bool sema_expr_analyse_ternary(Context *context, Type *to, Expr *e
 	expr->failable |= right->failable;
 	Type *left_canonical = left->type->canonical;
 	Type *right_canonical = right->type->canonical;
-	if (type_is_ct(left_canonical) && type_is_ct(right_canonical))
-	{
-		if (to)
-		{
-			if (!cast_implicit(left, to) || !cast_implicit(right, to)) return false;
-		}
-		else
-		{
-			if (!cast_implicitly_to_runtime(left) || !cast_implicitly_to_runtime(right)) return false;
-		}
-		left_canonical = left->type->canonical;
-		right_canonical = right->type->canonical;
-	}
 	if (left_canonical != right_canonical)
 	{
 		Type *max = type_find_max_type(left_canonical, right_canonical);
@@ -1041,14 +1028,6 @@ typedef struct
 static inline bool expr_promote_vararg(Context *context, Expr *arg)
 {
 	Type *arg_type = arg->type->canonical;
-	// 1. Is it compile time?
-	if (type_is_ct(arg_type))
-	{
-		// TODO Fix the int conversion.
-		// 1. Pick double / CInt
-		Type *target_type = type_is_any_integer(arg_type) ? type_cint() : type_double;
-		return cast_implicit(arg, target_type);
-	}
 
 	// 2. Promote any integer or bool to at least CInt
 	if (type_is_promotable_integer(arg_type) || arg_type == type_bool)
@@ -3388,10 +3367,12 @@ static inline bool sema_expr_analyse_untyped_initializer(Context *context, Expr 
 	Type *element_type = NULL;
 	bool no_common_elements = false;
 	unsigned element_count = vec_size(elements);
+	bool is_const = true;
 	for (unsigned i = 0; i < element_count; i++)
 	{
 		Expr *element = elements[i];
 		if (!sema_analyse_expr(context, NULL, element)) return false;
+		if (is_const && element->expr_kind != EXPR_CONST) is_const = false;
 		initializer->failable |= element->failable;
 		initializer->pure &= element->pure;
 		if (no_common_elements) continue;
@@ -3403,7 +3384,7 @@ static inline bool sema_expr_analyse_untyped_initializer(Context *context, Expr 
 		element_type = type_find_max_type(element->type, element_type);
 		if (!element_type) no_common_elements = true;
 	}
-	if (no_common_elements || type_is_ct(element_type))
+	if (no_common_elements || is_const)
 	{
 		expr_set_type(initializer, type_complist);
 		return true;
@@ -4464,20 +4445,6 @@ static bool sema_expr_analyse_shift(Context *context, Type *to, Expr *expr, Expr
 		}
 	}
 
-	// 7. In the case of 2 >> x, we will want to cast to the target type if available, otherwise we use a ct->runtime promotion.
-	if (type_is_ct(left->type))
-	{
-		if (to)
-		{
-			// 7a. The target type exists, convert to this type after arithmetic promotion.
-			if (!cast_implicit(left, numeric_arithmetic_promotion(to))) return false;
-		}
-		else
-		{
-			// 7b. Otherwise, use runtime promotion.
-			if (!cast_implicitly_to_runtime(left)) return false;
-		}
-	}
 
 	expr_copy_types(expr, left);
 

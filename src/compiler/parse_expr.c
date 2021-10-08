@@ -922,6 +922,18 @@ static Expr *parse_placeholder(Context *context, Expr *left)
 	return expr;
 }
 
+static int read_num_type(const char *string, const char *end)
+{
+	REMINDER("Limit num type reader");
+	int i = 0;
+	while (string < end)
+	{
+		i *= 10;
+		i += *(string++) - '0';
+	}
+	return i;
+}
+
 static Expr *parse_integer(Context *context, Expr *left)
 {
 	assert(!left && "Had left hand side");
@@ -936,13 +948,30 @@ static Expr *parse_integer(Context *context, Expr *left)
 	BigInt ten;
 	bigint_init_unsigned(&ten, 10);
 	BigInt res;
+	bool is_unsigned = false;
+	uint64_t type_bits = 0;
+	int hex_characters = 0;
+	int oct_characters = 0;
+	int binary_characters = 0;
 	switch (TOKLEN(context->tok) > 2 ? string[1] : '0')
 	{
 		case 'x':
 			string += 2;
+			is_unsigned = true;
 			while (string < end)
 			{
 				char c = *(string++);
+				if (c == 'u' || c == 'U')
+				{
+					type_bits = read_num_type(string, end);
+					break;
+				}
+				if (c == 'i' || c == 'I')
+				{
+					is_unsigned = false;
+					type_bits = read_num_type(string, end);
+					break;
+				}
 				if (c == '_') continue;
 				bigint_shl_int(&res, i, 4);
 				if (c < 'A')
@@ -957,18 +986,32 @@ static Expr *parse_integer(Context *context, Expr *left)
 				{
 					bigint_init_unsigned(&diff, c - 'a' + 10);
 				}
+				hex_characters++;
 				bigint_add(i, &res, &diff);
 			}
 			break;
 		case 'o':
 			string += 2;
+			is_unsigned = true;
 			while (string < end)
 			{
 				char c = *(string++);
+				if (c == 'i' || c == 'I')
+				{
+					is_unsigned = false;
+					type_bits = read_num_type(string, end);
+					break;
+				}
+				if (c == 'u' || c == 'U')
+				{
+					type_bits = read_num_type(string, end);
+					break;
+				}
 				if (c == '_') continue;
 				bigint_shl_int(&res, i, 4);
 				bigint_init_unsigned(&diff, c - '0');
 				bigint_add(i, &res, &diff);
+				oct_characters++;
 			}
 			break;
 		case 'b':
@@ -977,6 +1020,7 @@ static Expr *parse_integer(Context *context, Expr *left)
 			{
 				char c = *(string++);
 				if (c == '_') continue;
+				binary_characters++;
 				bigint_shl_int(&res, i, 1);
 				bigint_init_unsigned(&diff, c - '0');
 				bigint_add(i, &res, &diff);
@@ -986,6 +1030,18 @@ static Expr *parse_integer(Context *context, Expr *left)
 			while (string < end)
 			{
 				char c = *(string++);
+				if (c == 'i' || c == 'I')
+				{
+					is_unsigned = false;
+					type_bits = read_num_type(string, end);
+					break;
+				}
+				if (c == 'u' || c == 'U')
+				{
+					is_unsigned = true;
+					type_bits = read_num_type(string, end);
+					break;
+				}
 				if (c == '_') continue;
 				bigint_mul(&res, i, &ten);
 				bigint_init_unsigned(&diff, c - '0');
@@ -994,10 +1050,51 @@ static Expr *parse_integer(Context *context, Expr *left)
 			break;
 	}
 	expr_int->const_expr.const_kind = CONST_INTEGER;
-	Type *type = type_cint();
+	Type *type = is_unsigned ? type_cuint() : type_cint();
+	if (!type_bits && hex_characters)
+	{
+		type_bits = 8 * ((hex_characters + 1) / 2);
+		if (!is_power_of_two(type_bits)) type_bits = next_highest_power_of_2(type_bits);
+	}
+	if (type_bits && type_bits > 128)
+	{
+		SEMA_TOKEN_ERROR(context->tok, "Integer width exceeded 128 bits");
+		return poisoned_expr;
+	}
+	if (type_bits && !is_power_of_two(type_bits))
+	{
+		SEMA_TOKEN_ERROR(context->tok, "Integer width should be 8, 16, 32, 64 or 128.");
+		return poisoned_expr;
+	}
+	if (type_bits > 32)
+	{
+		assert(true);
+	}
+	if (!bigint_fits_in_bits(i, type_bits ? type_bits : type->builtin.bitsize, !is_unsigned))
+	{
+		int radix = 10;
+		if (hex_characters) radix = 16;
+		if (oct_characters) radix = 8;
+		if (binary_characters) radix = 2;
+		if (type_bits)
+		{
+			SEMA_TOKEN_ERROR(context->tok, "'%s' does not fit in a '%c%d' literal.",
+			                 bigint_to_error_string(i, radix), is_unsigned ? 'u' : 'i', type_bits);
+		}
+		else
+		{
+			SEMA_TOKEN_ERROR(context->tok, "'%s' does not fit in an %s literal.",
+							 bigint_to_error_string(i, radix), is_unsigned ? "unsigned int" : "int");
+		}
+		return poisoned_expr;
+	}
+	if (type_bits)
+	{
+		type = is_unsigned ? type_int_unsigned_by_bitsize(type_bits) : type_int_signed_by_bitsize(type_bits);
+	}
 	expr_int->const_expr.int_type = type->type_kind;
-	expr_set_type(expr_int, type);
-	expr_int->const_expr.narrowable = true;
+	expr_int->type = type;
+	expr_int->const_expr.narrowable = !type_bits;
 	advance(context);
 	return expr_int;
 }

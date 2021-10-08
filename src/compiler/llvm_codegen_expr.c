@@ -1858,6 +1858,30 @@ void llvm_emit_int_comp(GenContext *c, BEValue *result, Type *lhs_type, Type *rh
 			rhs_signed = false;
 		}
 	}
+	if (lhs_signed && !rhs_signed && !vector_type && LLVMIsConstant(lhs_value) && type_size(lhs_type) <= 64)
+	{
+		long long val = LLVMConstIntGetSExtValue(lhs_value);
+		if (val < 0)
+		{
+			switch (binary_op)
+			{
+				case BINARYOP_EQ:
+				case BINARYOP_GE:
+				case BINARYOP_GT:
+					llvm_value_set(result, llvm_const_int(c, type_bool, 0), type_bool);
+					return;
+				case BINARYOP_NE:
+				case BINARYOP_LE:
+				case BINARYOP_LT:
+					llvm_value_set(result, llvm_const_int(c, type_bool, 1), type_bool);
+					return;
+				default:
+					UNREACHABLE
+			}
+		}
+		lhs_signed = false;
+	}
+
 	if (!lhs_signed)
 	{
 		assert(lhs_signed == rhs_signed);
@@ -1895,9 +1919,11 @@ void llvm_emit_int_comp(GenContext *c, BEValue *result, Type *lhs_type, Type *rh
 		return;
 	}
 
+
 	// Left side is signed.
 	LLVMValueRef comp_value;
 	LLVMValueRef check_value;
+
 	switch (binary_op)
 	{
 		case BINARYOP_EQ:

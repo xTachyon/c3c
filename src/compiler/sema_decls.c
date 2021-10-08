@@ -1358,7 +1358,6 @@ bool sema_analyse_var_decl(Context *context, Decl *decl)
 	{
 		bool type_is_inferred = decl->type->type_kind == TYPE_INFERRED_ARRAY;
 		Expr *init = decl->var.init_expr;
-
 		// Handle explicit undef
 		if (init->expr_kind == EXPR_UNDEF)
 		{
@@ -1407,6 +1406,7 @@ bool sema_analyse_var_decl(Context *context, Decl *decl)
 				return decl_poison(decl);
 			}
 		}
+		if (init_expr->expr_kind == EXPR_CONST) init_expr->const_expr.narrowable = false;
 	}
 	EXIT_OK:
 	if (!decl->alignment) decl->alignment = type_alloca_alignment(decl->type);

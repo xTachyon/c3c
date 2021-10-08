@@ -1992,7 +1992,6 @@ Type *type_int_unsigned_by_bitsize(unsigned bytesize);
 bool type_is_abi_aggregate(Type *type);
 static inline bool type_is_any_integer(Type *type);
 static inline bool type_is_builtin(TypeKind kind);
-static inline bool type_is_ct(Type *type);
 bool type_is_empty_record(Type *type, bool allow_array);
 bool type_is_empty_field(Type *type, bool allow_array);
 static inline bool type_is_float(Type *type);
@@ -2092,21 +2091,6 @@ static inline bool type_info_poison(TypeInfo *type)
 	return false;
 }
 
-static inline bool type_is_ct(Type *type)
-{
-	RETRY:
-	switch (type->type_kind)
-	{
-		case TYPE_FXX:
-		case TYPE_IXX:
-			return true;
-		case TYPE_TYPEDEF:
-			type = type->canonical;
-			goto RETRY;
-		default:
-			return false;
-	}
-}
 
 static inline bool type_is_pointer(Type *type)
 {
