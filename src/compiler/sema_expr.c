@@ -3531,14 +3531,16 @@ static inline bool sema_expr_analyse_cast(Context *context, Type *to, Expr *expr
 	Type *target_type = expr->cast_expr.type_info->type;
 	if (!cast_may_explicit(inner->type, target_type))
 	{
+		if (inner->expr_kind == EXPR_CONST && type_is_integer(inner->type->canonical) && target_type->canonical->type_kind == TYPE_POINTER)
+		{
+			goto OK;
+		}
 		SEMA_ERROR(expr, "Cannot cast %s to %s.", type_quoted_error_string(inner->type), type_quoted_error_string(target_type));
 		return false;
 	}
-
+	OK:
 	cast(inner, target_type);
-
 	expr_replace(expr, inner);
-
 	return true;
 }
 
