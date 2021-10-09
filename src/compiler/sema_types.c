@@ -18,7 +18,7 @@ static inline bool sema_resolve_ptr_type(Context *context, TypeInfo *type_info)
 bool sema_resolve_array_like_len(Context *context, TypeInfo *type_info, ArrayIndex *len_ref)
 {
 	Expr *len_expr = type_info->array.len;
-	if (!sema_analyse_expr(context, type_usize, len_expr)) return type_info_poison(type_info);
+	if (!sema_analyse_expr(context, len_expr)) return type_info_poison(type_info);
 
 	if (len_expr->expr_kind != EXPR_CONST)
 	{
@@ -243,7 +243,7 @@ bool sema_resolve_type_shallow(Context *context, TypeInfo *type_info, bool allow
 		case TYPE_INFO_EXPRESSION:
 		{
 			Expr *expr = type_info->unresolved_type_expr;
-			if (!sema_analyse_expr(context, NULL, expr))
+			if (!sema_analyse_expr(context, expr))
 			{
 				return type_info_poison(type_info);
 			}

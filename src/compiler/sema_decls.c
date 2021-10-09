@@ -896,7 +896,7 @@ AttributeType sema_analyse_attribute(Context *context, Attr *attr, AttributeDoma
 				SEMA_TOKID_ERROR(attr->name, "'align' requires an power-of-2 argument, e.g. align(8).");
 				return ATTRIBUTE_NONE;
 			}
-			if (!sema_analyse_expr(context, type_usize, attr->expr)) return false;
+			if (!sema_analyse_expr(context, attr->expr)) return false;
 			if (attr->expr->expr_kind != EXPR_CONST || !type_is_integer(attr->expr->type->canonical))
 			{
 				SEMA_ERROR(attr->expr, "Expected a constant integer value as argument.");
@@ -937,7 +937,7 @@ AttributeType sema_analyse_attribute(Context *context, Attr *attr, AttributeDoma
 				SEMA_TOKID_ERROR(attr->name, "'%s' requires a string argument, e.g. %s(\"foo\").", TOKSTR(attr->name), TOKSTR(attr->name));
 				return ATTRIBUTE_NONE;
 			}
-			if (!sema_analyse_expr(context, NULL, attr->expr)) return false;
+			if (!sema_analyse_expr(context, attr->expr)) return false;
 			if (attr->expr->expr_kind != EXPR_CONST || attr->expr->type->canonical != type_compstr)
 			{
 				SEMA_ERROR(attr->expr, "Expected a constant string value as argument.");
@@ -1332,7 +1332,7 @@ bool sema_analyse_var_decl(Context *context, Decl *decl)
 		}
 		if (!decl->var.type_info)
 		{
-			if (!sema_analyse_expr(context, NULL, init_expr)) return false;
+			if (!sema_analyse_expr(context, init_expr)) return false;
 			decl->type = init_expr->type;
 			if (!decl->alignment) decl->alignment = type_alloca_alignment(decl->type);
 
