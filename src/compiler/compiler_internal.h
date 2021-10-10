@@ -267,7 +267,7 @@ typedef struct
 
 struct Type_
 {
-	TypeKind type_kind : 8;
+	TypeKind type_kind;
 	Type *canonical;
 	const char *name;
 	Type **type_cache;
@@ -289,6 +289,8 @@ struct Type_
 		Type *pointer;
 		// Type[<123>] or Type<[123]>
 		TypeVector vector;
+		// Failable
+		Type *failable;
 	};
 };
 
@@ -296,6 +298,7 @@ struct TypeInfo_
 {
 	ResolveStatus resolve_status : 3;
 	bool virtual_type : 1;
+	bool failable : 1;
 	Type *type;
 	TypeInfoKind kind;
 	SourceSpan span;
@@ -350,7 +353,6 @@ typedef struct VarDecl_
 {
 	VarDeclKind kind : 4;
 	bool constant : 1;
-	bool failable : 1;
 	bool unwrap : 1;
 	bool vararg : 1;
 	bool is_static : 1;
@@ -421,7 +423,6 @@ typedef struct FunctionSignature_
 	CallABI call_abi : 4;
 	Variadic variadic : 3;
 	bool has_default : 1;
-	bool failable : 1;
 	bool use_win64 : 1;
 	TypeInfo *rtype;
 	struct ABIArgInfo_ *ret_abi_info;
@@ -494,7 +495,6 @@ typedef struct
 
 typedef struct
 {
-	bool failable : 1;
 	Decl **parameters;
 	TypeInfo *type_parent; // May be null
 	TypeInfo *rtype; // May be null!
@@ -922,7 +922,6 @@ struct Expr_
 {
 	ExprKind expr_kind : 8;
 	ResolveStatus resolve_status : 3;
-	bool failable : 1;
 	bool pure : 1;
 	SourceSpan span;
 	Type *type;
@@ -1413,7 +1412,6 @@ typedef struct Context_
 		Ast **returns_cache;
 	};
 	Type *rtype;
-	bool failable_return;
 	int in_volatile_section;
 	MacroScope macro_scope;
 	struct {
@@ -1891,7 +1889,7 @@ bool sema_analyse_ct_assert_stmt(Context *context, Ast *statement);
 bool sema_analyse_statement(Context *context, Ast *statement);
 bool sema_expr_analyse_assign_right_side(Context *context, Expr *expr, Type *left_type, Expr *right, ExprFailableStatus lhs_is_failable);
 
-bool sema_expr_analyse_general_call(Context *context, Expr *expr, Decl *decl, Expr *struct_var, bool is_macro);
+bool sema_expr_analyse_general_call(Context *context, Expr *expr, Decl *decl, Expr *struct_var, bool is_macro, bool failable);
 Decl *sema_resolve_symbol_in_current_dynamic_scope(Context *context, const char *symbol);
 Decl *sema_resolve_parameterized_symbol(Context *context, TokenId symbol, Path *path);
 Decl *sema_resolve_method(Context *context, Decl *type, const char *method_name, Decl **ambiguous_ref, Decl **private_ref);
@@ -1982,7 +1980,7 @@ Type *type_get_indexed_type(Type *type);
 Type *type_get_ptr(Type *ptr_type);
 Type *type_get_subarray(Type *arr_type);
 Type *type_get_inferred_array(Type *arr_type);
-
+Type *type_get_failable(Type *failable_type);
 Type *type_get_vector(Type *vector_type, unsigned len);
 Type *type_get_vector_bool(Type *original_type);
 Type *type_cint(void);
@@ -2022,7 +2020,6 @@ static inline Type *type_reduced_from_expr(Expr *expr);
 ByteSize type_size(Type *type);
 const char *type_to_error_string(Type *type);
 const char *type_quoted_error_string(Type *type);
-bool type_may_convert_to_boolean(Type *type);
 
 static inline TypeInfo *type_info_new(TypeInfoKind kind, SourceSpan span);
 static inline TypeInfo *type_info_new_base(Type *type, SourceSpan span);
@@ -2041,6 +2038,10 @@ static inline Type *type_reduced_from_expr(Expr *expr)
 	return type_lowering(expr->type);
 }
 
+static inline Type *type_no_fail(Type *type)
+{
+	return type->type_kind == TYPE_FAILABLE ? type->failable : type;
+}
 
 static inline bool type_is_pointer_sized_or_more(Type *type)
 {
@@ -2052,31 +2053,46 @@ static inline bool type_is_pointer_sized(Type *type)
 	return type_is_integer(type) && type_size(type) == type_size(type_iptr);
 }
 
+#define DECL_TYPE_KIND_REAL(k_, t_) \
+ TypeKind k_ = (t_)->type_kind; \
+ if (k_ == TYPE_TYPEDEF) k_ = (t_)->canonical->type_kind;
+
+#define IS_FAILABLE(element_) ((element_)->type->type_kind == TYPE_FAILABLE)
+
+static inline Type *type_with_added_failability(Expr *expr, bool add_failable)
+{
+	Type *type = expr->type;
+	if (!add_failable || type->type_kind == TYPE_FAILABLE) return type;
+	return type_get_failable(type);
+}
+
+static inline Type *type_get_opt_fail(Type *type, bool add_failable)
+{
+	if (!add_failable || type->type_kind == TYPE_FAILABLE) return type;
+	return type_get_failable(type);
+}
 
 static inline bool type_is_integer(Type *type)
 {
-	TypeKind kind = type->type_kind;
-	if (kind == TYPE_DISTINCT) kind = type->canonical->type_kind;
+	DECL_TYPE_KIND_REAL(kind, type);
 	return kind >= TYPE_INTEGER_FIRST && type->type_kind <= TYPE_INTEGER_LAST;
 }
 
 static inline bool type_is_integer_signed(Type *type)
 {
-	TypeKind kind = type->type_kind;
-	if (kind == TYPE_DISTINCT) kind = type->canonical->type_kind;
+	DECL_TYPE_KIND_REAL(kind, type);
 	return kind >= TYPE_INT_FIRST && type->type_kind <= TYPE_INT_LAST;
 }
 
 static inline bool type_is_integer_or_bool_kind(Type *type)
 {
-	assert(type == type->canonical);
-	return type->type_kind >= TYPE_BOOL && type->type_kind <= TYPE_U128;
+	DECL_TYPE_KIND_REAL(kind, type);
+	return kind >= TYPE_BOOL && kind <= TYPE_U128;
 }
 
 static inline bool type_is_integer_unsigned(Type *type)
 {
-	TypeKind kind = type->type_kind;
-	if (kind == TYPE_DISTINCT) kind = type->canonical->type_kind;
+	DECL_TYPE_KIND_REAL(kind, type);
 	return kind >= TYPE_UINT_FIRST && type->type_kind <= TYPE_UINT_LAST;
 }
 
@@ -2090,8 +2106,8 @@ static inline bool type_info_poison(TypeInfo *type)
 
 static inline bool type_is_pointer(Type *type)
 {
-	type = type->canonical;
-	return type->type_kind == TYPE_POINTER;
+	DECL_TYPE_KIND_REAL(kind, type);
+	return kind == TYPE_POINTER;
 }
 
 static inline uint64_t aligned_offset(uint64_t offset, uint64_t alignment)
@@ -2101,14 +2117,13 @@ static inline uint64_t aligned_offset(uint64_t offset, uint64_t alignment)
 
 static inline bool type_is_substruct(Type *type)
 {
-	assert(type == type->canonical);
-	return type->type_kind == TYPE_STRUCT && type->decl->is_substruct;
+	DECL_TYPE_KIND_REAL(kind, type);
+	return kind == TYPE_STRUCT && type->decl->is_substruct;
 }
 
 static inline bool type_is_float(Type *type)
 {
-	TypeKind kind = type->type_kind;
-	if (kind == TYPE_DISTINCT) kind = type->canonical->type_kind;
+	DECL_TYPE_KIND_REAL(kind, type);
 	return kind >= TYPE_FLOAT_FIRST && kind <= TYPE_FLOAT_LAST;
 }
 
@@ -2212,6 +2227,12 @@ static inline Type *type_flatten(Type *type)
 		if (type->type_kind == TYPE_ENUM)
 		{
 			type = type->decl->enums.type_info->type;
+			continue;
+		}
+		if (type->type_kind == TYPE_FAILABLE)
+		{
+			type = type->failable;
+			if (!type) type = type_void;
 			continue;
 		}
 		return type;
@@ -2375,3 +2396,15 @@ void platform_linker(const char *output_file, const char **files, unsigned file_
 #define ASSIGN_TYPE_ELSE(_assign, _type_stmt, _res) TypeInfo* TEMP(_type) = (_type_stmt); if (!type_info_ok(TEMP(_type))) return _res; _assign = TEMP(_type)
 #define ASSIGN_DECL_ELSE(_assign, _decl_stmt, _res) Decl* TEMP(_decl) = (_decl_stmt); if (!decl_ok(TEMP(_decl))) return _res; _assign = TEMP(_decl)
 
+static inline Type *abi_rtype(FunctionSignature *signature)
+{
+	Type *type = signature->rtype->type;
+	if (type->type_kind == TYPE_FAILABLE) return type->failable;
+	return type;
+}
+
+static inline Type *abi_returntype(FunctionSignature *signature)
+{
+	Type *type = signature->rtype->type;
+	return type->type_kind == TYPE_FAILABLE ? type_anyerr : type;
+}

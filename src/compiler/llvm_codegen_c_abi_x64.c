@@ -402,6 +402,7 @@ static void x64_classify(Type *type, ByteSize offset_base, X64Class *lo_class, X
 		case TYPE_ANYERR:
 		case TYPE_ERRTYPE:
 		case TYPE_BITSTRUCT:
+		case TYPE_FAILABLE:
 		case CT_TYPES:
 			UNREACHABLE
 		case TYPE_VOID:
@@ -596,6 +597,7 @@ AbiType *x64_get_int_type_at_offset(Type *type, unsigned offset, Type *source_ty
 		case TYPE_ANYERR:
 		case TYPE_ERRTYPE:
 		case TYPE_BITSTRUCT:
+		case TYPE_FAILABLE:
 		case CT_TYPES:
 			UNREACHABLE
 		case TYPE_I128:
@@ -910,21 +912,22 @@ void c_abi_func_create_x64(FunctionSignature *signature)
 			.sse_registers = is_regcall ? 16 : 8
 	};
 
-	if (signature->failable)
+	Type *rtype = abi_rtype(signature);
+	if (IS_FAILABLE(signature->rtype))
 	{
 		signature->failable_abi_info = x64_classify_return_type(type_anyerr, &available_registers, is_regcall);
 		if (abi_arg_is_indirect(signature->failable_abi_info))
 		{
 			available_registers.int_registers--;
 		}
-		if (signature->rtype->type->type_kind != TYPE_VOID)
+		if (rtype->type_kind != TYPE_VOID)
 		{
-			signature->ret_abi_info = x64_classify_parameter(type_get_ptr(type_lowering(signature->rtype->type)), &available_registers, is_regcall, NAMED);
+			signature->ret_abi_info = x64_classify_parameter(type_get_ptr(type_lowering(rtype)), &available_registers, is_regcall, NAMED);
 		}
 	}
 	else
 	{
-		signature->ret_abi_info = x64_classify_return_type(signature->rtype->type, &available_registers, is_regcall);
+		signature->ret_abi_info = x64_classify_return_type(rtype, &available_registers, is_regcall);
 		if (abi_arg_is_indirect(signature->ret_abi_info))
 		{
 			available_registers.int_registers--;

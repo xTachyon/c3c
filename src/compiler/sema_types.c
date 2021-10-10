@@ -213,6 +213,9 @@ bool sema_resolve_type(Context *context, Type *type)
 			return sema_resolve_type(context, type->array.base);
 		case TYPE_VIRTUAL:
 			TODO;
+		case TYPE_FAILABLE:
+			if (!type->failable) return true;
+			return sema_resolve_type(context, type->failable);
 	}
 	return sema_analyse_decl(context, type->decl);
 }
@@ -249,6 +252,7 @@ bool sema_resolve_type_shallow(Context *context, TypeInfo *type_info, bool allow
 			}
 			type_info->type = expr->type;
 			type_info->resolve_status = RESOLVE_DONE;
+			assert(!type_info->failable);
 			return true;
 		}
 		case TYPE_INFO_INFERRED_ARRAY:
@@ -266,6 +270,10 @@ bool sema_resolve_type_shallow(Context *context, TypeInfo *type_info, bool allow
 		case TYPE_INFO_POINTER:
 			if (!sema_resolve_ptr_type(context, type_info)) return false;
 			break;
+	}
+	if (type_info->failable)
+	{
+		type_info->type = type_get_failable(type_info->type);
 	}
 	return true;
 }

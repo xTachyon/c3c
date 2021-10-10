@@ -34,6 +34,9 @@ static void header_print_type(FILE *file, Type *type)
 			UNREACHABLE
 		case TYPE_BITSTRUCT:
 			TODO
+		case TYPE_FAILABLE:
+			// If this is reachable then we are not doing the proper lowering.
+			UNREACHABLE
 		case TYPE_VOID:
 			OUTPUT("void");
 			return;

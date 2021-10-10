@@ -57,7 +57,8 @@ static AlignSize max_alignment_vector;
 #define PTR_OFFSET 0
 #define INFERRED_ARRAY_OFFSET 1
 #define SUB_ARRAY_OFFSET 2
-#define ARRAY_OFFSET 3
+#define FAILABLE_OFFSET 3
+#define ARRAY_OFFSET 4
 
 Type *type_cint(void)
 {
@@ -144,6 +145,10 @@ const char *type_to_error_string(Type *type)
 			}
 			asprintf(&buffer, "%s*", type_to_error_string(type->pointer));
 			return buffer;
+		case TYPE_FAILABLE:
+			if (!type->failable) return "void!";
+			asprintf(&buffer, "%s!", type_to_error_string(type->failable));
+			return buffer;
 		case TYPE_STRLIT:
 			return "string literal";
 		case TYPE_ARRAY:
@@ -187,12 +192,15 @@ void type_append_signature_name(Type *type, char *dst, size_t *offset)
 
 ByteSize type_size(Type *type)
 {
+RETRY:
 	switch (type->type_kind)
 	{
 		case TYPE_BITSTRUCT:
-			return type_size(type->decl->bitstruct.base_type->type);
+			type = type->decl->bitstruct.base_type->type;
+			goto RETRY;
 		case TYPE_DISTINCT:
-			return type_size(type->decl->distinct_decl.base_type);
+			type = type->decl->distinct_decl.base_type;
+			goto RETRY;
 		case TYPE_VECTOR:
 		{
 			ByteSize width = type_size(type->vector.base) * type->vector.len;
@@ -205,10 +213,16 @@ ByteSize type_size(Type *type)
 		}
 		case CT_TYPES:
 			UNREACHABLE;
+		case TYPE_FAILABLE:
+			type = type->failable;
+			if (!type) return 1;
+			goto RETRY;
 		case TYPE_TYPEDEF:
-			return type_size(type->canonical);
+			type = type->canonical;
+			goto RETRY;
 		case TYPE_ERRTYPE:
-			return type_size(type_usize->canonical);
+			type = type_iptr->canonical;
+			goto RETRY;
 		case TYPE_ENUM:
 			return type->decl->enums.type_info->type->canonical->builtin.bytesize;
 		case TYPE_STRUCT:
@@ -229,7 +243,7 @@ ByteSize type_size(Type *type)
 		case TYPE_STRLIT:
 		case TYPE_FUNC:
 		case TYPE_POINTER:
-			return t.usz.canonical->builtin.bytesize;
+			return t.iptr.canonical->builtin.bytesize;
 		case TYPE_ARRAY:
 			return type_size(type->array.base) * type->array.len;
 		case TYPE_SUBARRAY:
@@ -332,16 +346,22 @@ Type *type_abi_find_single_struct_element(Type *type)
 
 bool type_is_abi_aggregate(Type *type)
 {
+	RETRY:
 	switch (type->type_kind)
 	{
 		case TYPE_POISONED:
 			return false;
+		case TYPE_FAILABLE:
+			type = type->failable;
+			if (!type) return false;
+			goto RETRY;
 		case TYPE_DISTINCT:
-			return type_is_abi_aggregate(type->decl->distinct_decl.base_type);
+			type = type->decl->distinct_decl.base_type;
+			goto RETRY;
 		case TYPE_TYPEDEF:
-			return type_is_abi_aggregate(type->canonical);
+			type = type->canonical;
+			goto RETRY;
 		case TYPE_BITSTRUCT:
-			return type_is_abi_aggregate(type->decl->bitstruct.base_type->type);
 		case ALL_FLOATS:
 		case TYPE_VOID:
 		case ALL_INTS:
@@ -495,6 +515,10 @@ bool type_is_homogenous_aggregate(Type *type, Type **base, unsigned *elements)
 	RETRY:
 	switch (type->type_kind)
 	{
+		case TYPE_FAILABLE:
+			type = type->failable;
+			if (!type) return false;
+			goto RETRY;
 		case TYPE_DISTINCT:
 			type = type->decl->distinct_decl.base_type;
 			goto RETRY;
@@ -698,6 +722,7 @@ bool type_is_comparable(Type *type)
 
 AlignSize type_abi_alignment(Type *type)
 {
+	RETRY:
 	switch (type->type_kind)
 	{
 		case TYPE_POISONED:
@@ -705,7 +730,8 @@ AlignSize type_abi_alignment(Type *type)
 		case TYPE_UNTYPED_LIST:
 			UNREACHABLE;
 		case TYPE_BITSTRUCT:
-			return type_abi_alignment(type->decl->bitstruct.base_type->type);
+			type = type->decl->bitstruct.base_type->type;
+			goto RETRY;
 		case TYPE_VECTOR:
 		{
 			ByteSize width = type_size(type->vector.base) * type->vector.len;
@@ -719,10 +745,16 @@ AlignSize type_abi_alignment(Type *type)
 		}
 		case TYPE_VOID:
 			return 1;
+		case TYPE_FAILABLE:
+			type = type->failable;
+			if (!type) return 1;
+			goto RETRY;
 		case TYPE_DISTINCT:
-			return type_abi_alignment(type->decl->distinct_decl.base_type);
+			type = type->decl->distinct_decl.base_type;
+			goto RETRY;
 		case TYPE_TYPEDEF:
-			return type_abi_alignment(type->canonical);
+			type = type->canonical;
+			goto RETRY;
 		case TYPE_ENUM:
 			return type->decl->enums.type_info->type->canonical->builtin.abi_alignment;
 		case TYPE_ERRTYPE:
@@ -730,8 +762,6 @@ AlignSize type_abi_alignment(Type *type)
 		case TYPE_STRUCT:
 		case TYPE_UNION:
 			return type->decl->alignment;
-		case TYPE_TYPEID:
-			return type_abi_alignment(type_usize);
 		case TYPE_BOOL:
 		case ALL_INTS:
 		case ALL_FLOATS:
@@ -743,10 +773,12 @@ AlignSize type_abi_alignment(Type *type)
 		case TYPE_FUNC:
 		case TYPE_POINTER:
 		case TYPE_STRLIT:
+		case TYPE_TYPEID:
 			return t.iptr.canonical->builtin.abi_alignment;
 		case TYPE_ARRAY:
 		case TYPE_INFERRED_ARRAY:
-			return type_abi_alignment(type->array.base);
+			type = type->array.base;
+			goto RETRY;
 		case TYPE_SUBARRAY:
 			return alignment_subarray;
 	}
@@ -787,6 +819,30 @@ static Type *type_generate_ptr(Type *ptr_type, bool canonical)
 	return ptr;
 }
 
+static Type *type_generate_failable(Type *failable_type, bool canonical)
+{
+	if (canonical) failable_type = failable_type->canonical;
+	if (!failable_type->type_cache)
+	{
+		create_type_cache(failable_type);
+	}
+	Type *failable = failable_type->type_cache[FAILABLE_OFFSET];
+	if (failable == NULL)
+	{
+		failable = type_new(TYPE_FAILABLE, strformat("%s!", failable_type->name));
+		failable->pointer = failable_type;
+		failable_type->type_cache[FAILABLE_OFFSET] = failable;
+		if (failable_type == failable_type->canonical)
+		{
+			failable->canonical = failable;
+		}
+		else
+		{
+			failable->canonical = type_generate_failable(failable_type->canonical, true);
+		}
+	}
+	return failable;
+}
 
 static Type *type_generate_subarray(Type *arr_type, bool canonical)
 {
@@ -845,6 +901,11 @@ static Type *type_generate_inferred_array(Type *arr_type, bool canonical)
 Type *type_get_ptr(Type *ptr_type)
 {
 	return type_generate_ptr(ptr_type, false);
+}
+
+Type *type_get_failable(Type *failable_type)
+{
+	return type_generate_failable(failable_type, false);
 }
 
 Type *type_get_subarray(Type *arr_type)
@@ -1140,6 +1201,17 @@ static void type_append_name_to_scratch(Type *type)
 			type_append_name_to_scratch(type->pointer);
 			scratch_buffer_append_char('*');
 			break;
+		case TYPE_FAILABLE:
+			if (type->failable)
+			{
+				type_append_name_to_scratch(type->failable);
+			}
+			else
+			{
+				scratch_buffer_append("void");
+			}
+			scratch_buffer_append_char('!');
+			break;
 		case TYPE_SUBARRAY:
 			type_append_name_to_scratch(type->pointer);
 			scratch_buffer_append("[]");
@@ -1186,7 +1258,6 @@ Type *type_find_function_type(FunctionSignature *signature)
 {
 	scratch_buffer_clear();
 	type_append_name_to_scratch(signature->rtype->type);
-	if (signature->failable) scratch_buffer_append_char('!');
 	scratch_buffer_append_char('(');
 	unsigned elements = vec_size(signature->params);
 	for (unsigned i = 0; i < elements; i++)
@@ -1319,6 +1390,10 @@ bool type_is_scalar(Type *type)
 		case TYPE_DISTINCT:
 			type = type->decl->distinct_decl.base_type;
 			goto RETRY;
+		case TYPE_FAILABLE:
+			type = type->failable;
+			if (!type) return false;
+			goto RETRY;
 		case TYPE_TYPEDEF:
 			type = type->canonical;
 			goto RETRY;
@@ -1405,46 +1480,6 @@ Type *type_from_token(TokenType type)
 	}
 }
 
-bool type_may_convert_to_boolean(Type *type)
-{
-	RETRY:
-	switch (type->type_kind)
-	{
-		case TYPE_POISONED:
-			return false;
-		case TYPE_TYPEDEF:
-			type = type->canonical;
-			goto RETRY;
-		case TYPE_DISTINCT:
-			type = type->decl->distinct_decl.base_type;
-			goto RETRY;
-		case ALL_INTS:
-		case ALL_FLOATS:
-		case TYPE_POINTER:
-		case TYPE_VIRTUAL:
-		case TYPE_VIRTUAL_ANY:
-		case TYPE_BOOL:
-		case TYPE_SUBARRAY:
-		case TYPE_ENUM:
-		case TYPE_ANYERR:
-		case TYPE_ERRTYPE:
-		case TYPE_STRLIT:
-		case TYPE_UNTYPED_LIST:
-			return true;
-		case TYPE_FUNC:
-		case TYPE_ARRAY:
-		case TYPE_INFERRED_ARRAY:
-		case TYPE_BITSTRUCT:
-		case TYPE_VECTOR:
-		case TYPE_STRUCT:
-		case TYPE_TYPEID:
-		case TYPE_TYPEINFO:
-		case TYPE_UNION:
-		case TYPE_VOID:
-			return false;
-	}
-	UNREACHABLE
-}
 bool type_may_have_sub_elements(Type *type)
 {
 	// An alias is not ok.
@@ -1564,6 +1599,9 @@ Type *type_find_max_type(Type *type, Type *other)
 {
 	assert(type->canonical == type);
 	assert(other->canonical == other);
+
+	assert(type->type_kind != TYPE_FAILABLE && other->type_kind != TYPE_FAILABLE);
+
 	if (type == other) return type;
 
 	// Sort types
@@ -1578,6 +1616,7 @@ Type *type_find_max_type(Type *type, Type *other)
 	{
 		case TYPE_INFERRED_ARRAY:
 		case TYPE_POISONED:
+		case TYPE_FAILABLE:
 			UNREACHABLE
 		case TYPE_VOID:
 		case TYPE_BOOL:

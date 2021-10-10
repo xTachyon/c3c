@@ -57,7 +57,7 @@ LLVMValueRef llvm_emit_local_decl(GenContext *c, Decl *decl)
 		void *builder = c->builder;
 		c->builder = NULL;
 		decl->backend_ref = LLVMAddGlobal(c->module, llvm_get_type(c, decl->type), "tempglobal");
-		if (decl->var.failable)
+		if (IS_FAILABLE(decl))
 		{
 			scratch_buffer_clear();
 			scratch_buffer_append(decl->external_name);
@@ -69,14 +69,14 @@ LLVMValueRef llvm_emit_local_decl(GenContext *c, Decl *decl)
 		return decl->backend_ref;
 	}
 	llvm_emit_local_var_alloca(c, decl);
-	if (decl->var.failable)
+	if (IS_FAILABLE(decl))
 	{
 		scratch_buffer_clear();
 		scratch_buffer_append(decl->name);
 		scratch_buffer_append(".f");
 		decl->var.failable_ref = llvm_emit_alloca_aligned(c, type_anyerr, scratch_buffer_to_string());
 		// Only clear out the result if the assignment isn't a failable.
-		if (!decl->var.init_expr || !decl->var.init_expr->failable)
+		if (!decl->var.init_expr || !IS_FAILABLE(decl->var.init_expr))
 		{
 			LLVMBuildStore(c->builder, LLVMConstNull(llvm_get_type(c, type_anyerr)), decl->var.failable_ref);
 		}
@@ -178,7 +178,7 @@ static inline void gencontext_emit_return(GenContext *c, Ast *ast)
 		c->error_var = c->block_error_var;
 		c->catch_block = c->block_failable_exit;
 	}
-	else if (c->cur_func_decl->func_decl.function_signature.failable)
+	else if (IS_FAILABLE(c->cur_func_decl->func_decl.function_signature.rtype))
 	{
 		error_return_block = llvm_basic_block_new(c, "err_retblock");
 		error_out = llvm_emit_alloca_aligned(c, type_anyerr, "reterr");
@@ -1092,7 +1092,7 @@ static inline void gencontext_emit_unreachable_stmt(GenContext *context, Ast *as
 void gencontext_emit_expr_stmt(GenContext *c, Ast *ast)
 {
 	BEValue value;
-	if (ast->expr_stmt->failable)
+	if (IS_FAILABLE(ast->expr_stmt))
 	{
 		PUSH_ERROR();
 		LLVMBasicBlockRef discard_fail = llvm_basic_block_new(c, "voiderr");

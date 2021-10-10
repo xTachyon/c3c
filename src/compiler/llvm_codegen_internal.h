@@ -307,7 +307,7 @@ static inline LLVMValueRef decl_failable_ref(Decl *decl)
 {
 	assert(decl->decl_kind == DECL_VAR);
 	if (decl->var.kind == VARDECL_UNWRAPPED) return decl_failable_ref(decl->var.alias);
-	if (!decl->var.failable) return NULL;
+	if (decl->type->type_kind != TYPE_FAILABLE) return NULL;
 	return decl->var.failable_ref;
 }
 
@@ -438,3 +438,4 @@ static inline bool abi_info_should_flatten(ABIArgInfo *info)
 {
 	return info->kind == ABI_ARG_DIRECT_COERCE && info->direct_coerce.elements > 1U && !info->direct_coerce.prevent_flatten;
 }
+

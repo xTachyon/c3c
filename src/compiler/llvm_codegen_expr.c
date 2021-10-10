@@ -3021,6 +3021,7 @@ static void llvm_expand_type_to_args(GenContext *context, Type *param_type, LLVM
 		case TYPE_ERRTYPE:
 		case TYPE_ANYERR:
 		case TYPE_BITSTRUCT:
+		case TYPE_FAILABLE:
 		case CT_TYPES:
 			UNREACHABLE
 			break;
@@ -3335,14 +3336,14 @@ void llvm_emit_call_expr(GenContext *c, BEValue *result_value, Expr *expr)
 
 	// 4. Prepare the return abi data.
 	ABIArgInfo *ret_info = signature->ret_abi_info;
-	Type *return_type = signature->rtype->type->canonical;
+	Type *return_type = abi_returntype(signature);
+	bool is_failable = IS_FAILABLE(signature->rtype);
 
 	// 5. In the case of a failable, the error is replacing the regular return abi.
 	LLVMValueRef error_var = NULL;
-	if (signature->failable)
+	if (is_failable)
 	{
 		ret_info = signature->failable_abi_info;
-		return_type = type_anyerr;
 	}
 
 	*result_value = (BEValue){ .kind = BE_VALUE, .value = NULL };
@@ -3351,7 +3352,7 @@ void llvm_emit_call_expr(GenContext *c, BEValue *result_value, Expr *expr)
 	{
 		case ABI_ARG_INDIRECT:
 			// 6a. We can use the stored error var if there is no redirect.
-			if (signature->failable && c->error_var && !ret_info->attributes.realign)
+			if (is_failable && c->error_var && !ret_info->attributes.realign)
 			{
 				error_var = c->error_var;
 				vec_add(values, error_var);
@@ -3378,7 +3379,7 @@ void llvm_emit_call_expr(GenContext *c, BEValue *result_value, Expr *expr)
 	// 7. We might have a failable indirect return and a normal return.
 	//    In this case we need to add it by hand.
 	BEValue synthetic_return_param = { 0 };
-	if (signature->failable && signature->ret_abi_info)
+	if (is_failable && signature->ret_abi_info)
 	{
 		// 7b. Create the address to hold the return.
 		Type *actual_return_type = type_lowering(signature->rtype->type);
@@ -3517,7 +3518,7 @@ void llvm_emit_call_expr(GenContext *c, BEValue *result_value, Expr *expr)
 		case ABI_ARG_IGNORE:
 			// 12. Basically void returns or empty structs.
 			//     Here we know we don't have a failable or any return value that can be used.
-			assert(!signature->failable && "Failable should have produced a return value.");
+			assert(!is_failable && "Failable should have produced a return value.");
 			*result_value = (BEValue) { .type = type_void, .kind = BE_VALUE };
 			return;
 		case ABI_ARG_INDIRECT:
@@ -3625,7 +3626,7 @@ void llvm_emit_call_expr(GenContext *c, BEValue *result_value, Expr *expr)
 	}
 
 	// 17. Handle failables.
-	if (signature->failable)
+	if (is_failable)
 	{
 		BEValue no_err;
 
@@ -3806,7 +3807,7 @@ BEValue llvm_emit_assign_expr(GenContext *c, BEValue *ref, Expr *expr, LLVMValue
 
 	if (failable)
 	{
-		if (expr->failable)
+		if (IS_FAILABLE(expr))
 		{
 			assign_block = llvm_basic_block_new(c, "after_assign");
 			c->error_var = failable;
@@ -3846,7 +3847,7 @@ BEValue llvm_emit_assign_expr(GenContext *c, BEValue *ref, Expr *expr, LLVMValue
 	}
 	POP_ERROR();
 
-	if (failable && expr->failable)
+	if (failable && IS_FAILABLE(expr))
 	{
 		llvm_emit_br(c, assign_block);
 		llvm_emit_block(c, assign_block);

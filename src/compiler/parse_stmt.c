@@ -459,8 +459,8 @@ static inline bool parse_foreach_var(Context *context, Ast *foreach)
 		SEMA_TOKEN_ERROR(context->tok, "Expected an identifier or type.");
 		return false;
 	}
+	if (failable) type->failable = true;
 	Decl *var = decl_new_var(context->prev_tok, type, VARDECL_LOCAL, VISIBLE_LOCAL);
-	var->var.failable = failable;
 	foreach->foreach_stmt.variable = var;
 	return true;
 }
@@ -593,7 +593,10 @@ static inline Ast *parse_decl_or_expr_stmt(Context *context)
 	{
 		ast->ast_kind = AST_DECLARE_STMT;
 		ASSIGN_DECL_ELSE(ast->declare_stmt, parse_decl_after_type(context, expr->type_expr), poisoned_ast);
-		ast->declare_stmt->var.failable = failable;
+		if (failable)
+		{
+			ast->declare_stmt->type = type_get_failable(ast->declare_stmt->type);
+		}
 	}
 	else
 	{

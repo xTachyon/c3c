@@ -384,6 +384,7 @@ CastKind cast_to_bool_kind(Type *type)
 		case TYPE_VECTOR:
 		case TYPE_BITSTRUCT:
 		case TYPE_UNTYPED_LIST:
+		case TYPE_FAILABLE:
 			return CAST_ERROR;
 	}
 	UNREACHABLE
@@ -391,9 +392,20 @@ CastKind cast_to_bool_kind(Type *type)
 
 bool cast_may_explicit(Type *from_type, Type *to_type)
 {
+	Type *from = from_type;
+	Type *to = to_type;
+
+	if (from_type->type_kind == TYPE_FAILABLE)
+	{
+		if (to_type->type_kind != TYPE_FAILABLE) return false;
+		from = from->failable;
+		if (!from) return true;
+		to = to->failable;
+	}
+
 	// 1. We flatten the distinct types, since they should be freely convertible
-	Type *from = type_flatten_distinct(from_type);
-	Type *to = type_flatten_distinct(to_type);
+	from = type_flatten_distinct(from);
+	to = type_flatten_distinct(to);
 
 	// 2. Same underlying type, always ok
 	if (from == to) return true;
@@ -401,13 +413,15 @@ bool cast_may_explicit(Type *from_type, Type *to_type)
 	TypeKind to_kind = to->type_kind;
 	switch (from->type_kind)
 	{
+		case TYPE_DISTINCT:
+		case TYPE_TYPEDEF:
+		case TYPE_FAILABLE:
+			UNREACHABLE
 		case TYPE_POISONED:
 		case TYPE_INFERRED_ARRAY:
 		case TYPE_VOID:
 		case TYPE_TYPEINFO:
-		case TYPE_DISTINCT:
 		case TYPE_FUNC:
-		case TYPE_TYPEDEF:
 			return false;
 		case TYPE_TYPEID:
 			// May convert to anything pointer sized or larger, no enums
@@ -1182,8 +1196,8 @@ static inline bool subarray_to_bool(Expr *expr)
 bool cast(Expr *expr, Type *to_type)
 {
 	Type *from_type = type_flatten(expr->type->canonical);
-	Type *canonical = type_flatten(to_type);
-	if (from_type == canonical)
+	Type *to = type_flatten(to_type);
+	if (from_type == to)
 	{
 		expr_set_type(expr, to_type);
 		if (expr->expr_kind == EXPR_CONST) expr->const_expr.narrowable = false;
@@ -1197,76 +1211,77 @@ bool cast(Expr *expr, Type *to_type)
 		case TYPE_FUNC:
 		case TYPE_TYPEDEF:
 		case CT_TYPES:
+		case TYPE_FAILABLE:
 			UNREACHABLE
 		case TYPE_BITSTRUCT:
 			UNREACHABLE
 		case TYPE_BOOL:
 			// Bool may convert into integers and floats but only explicitly.
-			if (type_is_integer(canonical)) return bool_to_int(expr, canonical, to_type);
-			if (type_is_float(canonical)) return bool_to_float(expr, canonical, to_type);
+			if (type_is_integer(to)) return bool_to_int(expr, to, to_type);
+			if (type_is_float(to)) return bool_to_float(expr, to, to_type);
 			break;
 		case TYPE_ANYERR:
-			if (canonical->type_kind == TYPE_BOOL) return insert_cast(expr, CAST_EUBOOL, to_type);
-			if (canonical->type_kind == TYPE_ERRTYPE) return insert_cast(expr, CAST_EUER, to_type);
-			if (type_is_integer(canonical)) return insert_cast(expr, CAST_EUINT, to_type);
+			if (to->type_kind == TYPE_BOOL) return insert_cast(expr, CAST_EUBOOL, to_type);
+			if (to->type_kind == TYPE_ERRTYPE) return insert_cast(expr, CAST_EUER, to_type);
+			if (type_is_integer(to)) return insert_cast(expr, CAST_EUINT, to_type);
 			break;
 		case ALL_SIGNED_INTS:
-			if (type_is_integer_unsigned(canonical)) return int_conversion(expr, CAST_SIUI, canonical, to_type);
-			if (type_is_integer_signed(canonical)) return int_conversion(expr, CAST_SISI, canonical, to_type);
-			if (type_is_float(canonical)) return int_to_float(expr, CAST_SIFP, canonical, to_type);
-			if (canonical == type_bool) return integer_to_bool(expr, to_type);
-			if (canonical->type_kind == TYPE_POINTER) return int_to_pointer(expr, to_type);
-			if (canonical->type_kind == TYPE_ENUM) return lit_integer_to_enum(expr, canonical, to_type);
+			if (type_is_integer_unsigned(to)) return int_conversion(expr, CAST_SIUI, to, to_type);
+			if (type_is_integer_signed(to)) return int_conversion(expr, CAST_SISI, to, to_type);
+			if (type_is_float(to)) return int_to_float(expr, CAST_SIFP, to, to_type);
+			if (to == type_bool) return integer_to_bool(expr, to_type);
+			if (to->type_kind == TYPE_POINTER) return int_to_pointer(expr, to_type);
+			if (to->type_kind == TYPE_ENUM) return lit_integer_to_enum(expr, to, to_type);
 			break;
 		case ALL_UNSIGNED_INTS:
-			if (type_is_integer_unsigned(canonical)) return int_conversion(expr, CAST_UIUI, canonical, to_type);
-			if (type_is_integer_signed(canonical)) return int_conversion(expr, CAST_UISI, canonical, to_type);
-			if (type_is_float(canonical)) return int_to_float(expr, CAST_UIFP, canonical, to_type);
-			if (canonical == type_bool) return integer_to_bool(expr, to_type);
-			if (canonical->type_kind == TYPE_POINTER) return int_to_pointer(expr, to_type);
+			if (type_is_integer_unsigned(to)) return int_conversion(expr, CAST_UIUI, to, to_type);
+			if (type_is_integer_signed(to)) return int_conversion(expr, CAST_UISI, to, to_type);
+			if (type_is_float(to)) return int_to_float(expr, CAST_UIFP, to, to_type);
+			if (to == type_bool) return integer_to_bool(expr, to_type);
+			if (to->type_kind == TYPE_POINTER) return int_to_pointer(expr, to_type);
 			break;
 		case ALL_FLOATS:
-			if (type_is_integer(canonical)) return float_to_integer(expr, canonical, to_type);
-			if (canonical == type_bool) return float_to_bool(expr, to_type);
-			if (type_is_float(canonical)) return float_to_float(expr, canonical, to_type);
+			if (type_is_integer(to)) return float_to_integer(expr, to, to_type);
+			if (to == type_bool) return float_to_bool(expr, to_type);
+			if (type_is_float(to)) return float_to_float(expr, to, to_type);
 			break;
 		case TYPE_POINTER:
-			if (type_is_integer(canonical)) return pointer_to_integer(expr, to_type);
-			if (canonical->type_kind == TYPE_BOOL) return pointer_to_bool(expr, to_type);
-			if (canonical->type_kind == TYPE_POINTER) return pointer_to_pointer(expr, to_type);
-			if (canonical->type_kind == TYPE_SUBARRAY) return insert_cast(expr, CAST_APTSA, to_type);
+			if (type_is_integer(to)) return pointer_to_integer(expr, to_type);
+			if (to->type_kind == TYPE_BOOL) return pointer_to_bool(expr, to_type);
+			if (to->type_kind == TYPE_POINTER) return pointer_to_pointer(expr, to_type);
+			if (to->type_kind == TYPE_SUBARRAY) return insert_cast(expr, CAST_APTSA, to_type);
 			break;
 		case TYPE_VIRTUAL:
 		case TYPE_VIRTUAL_ANY:
-			if (canonical->type_kind == TYPE_POINTER) return insert_cast(expr, CAST_VRPTR, to_type);
+			if (to->type_kind == TYPE_POINTER) return insert_cast(expr, CAST_VRPTR, to_type);
 			break;
 		case TYPE_ENUM:
-			if (type_is_integer(canonical)) return enum_to_integer(expr, from_type, canonical, to_type);
-			if (type_is_float(canonical)) return enum_to_float(expr, from_type, canonical, to_type);
-			if (canonical == type_bool) return enum_to_bool(expr, from_type, to_type);
-			if (canonical->type_kind == TYPE_POINTER) return enum_to_pointer(expr, from_type, to_type);
+			if (type_is_integer(to)) return enum_to_integer(expr, from_type, to, to_type);
+			if (type_is_float(to)) return enum_to_float(expr, from_type, to, to_type);
+			if (to == type_bool) return enum_to_bool(expr, from_type, to_type);
+			if (to->type_kind == TYPE_POINTER) return enum_to_pointer(expr, from_type, to_type);
 			break;
 		case TYPE_ERRTYPE:
-			if (canonical->type_kind == TYPE_ANYERR) return err_to_anyerr(expr, to_type);
-			if (canonical == type_bool) return err_to_bool(expr, to_type);
+			if (to->type_kind == TYPE_ANYERR) return err_to_anyerr(expr, to_type);
+			if (to == type_bool) return err_to_bool(expr, to_type);
 			if (type_is_integer(to_type)) return insert_cast(expr, CAST_ERINT, to_type);
 			break;
 		case TYPE_STRUCT:
 		case TYPE_UNION:
 		case TYPE_ARRAY:
-			if (canonical->type_kind == TYPE_ARRAY || canonical->type_kind == TYPE_STRUCT || canonical->type_kind == TYPE_UNION)
+			if (to->type_kind == TYPE_ARRAY || to->type_kind == TYPE_STRUCT || to->type_kind == TYPE_UNION)
 			{
 				return insert_cast(expr, CAST_STST, to_type);
 			} // Starting in a little while...
 			break;
 		case TYPE_STRLIT:
-			canonical = type_flatten(canonical);
-			if (canonical->type_kind == TYPE_POINTER) return insert_cast(expr, CAST_STRPTR, to_type);
-			if (canonical->type_kind == TYPE_SUBARRAY) return string_literal_to_subarray(expr, to_type);
+			to = type_flatten(to);
+			if (to->type_kind == TYPE_POINTER) return insert_cast(expr, CAST_STRPTR, to_type);
+			if (to->type_kind == TYPE_SUBARRAY) return string_literal_to_subarray(expr, to_type);
 			break;
 		case TYPE_SUBARRAY:
-			if (canonical->type_kind == TYPE_POINTER) return insert_cast(expr, CAST_SAPTR, canonical);
-			if (canonical->type_kind == TYPE_BOOL) return subarray_to_bool(expr);
+			if (to->type_kind == TYPE_POINTER) return insert_cast(expr, CAST_SAPTR, to);
+			if (to->type_kind == TYPE_BOOL) return subarray_to_bool(expr);
 			break;
 		case TYPE_VECTOR:
 			TODO

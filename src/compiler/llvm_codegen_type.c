@@ -232,8 +232,11 @@ LLVMTypeRef llvm_func_type(GenContext *context, Type *type)
 
 	LLVMTypeRef return_type = NULL;
 
-	Type *real_return_type = signature->failable ? type_anyerr : signature->rtype->type->canonical;
-	ABIArgInfo *ret_arg_info = signature->failable ? signature->failable_abi_info : signature->ret_abi_info;
+	Type *rtype = signature->rtype->type;
+	bool is_failable = rtype->type_kind == TYPE_FAILABLE;
+	if (is_failable) rtype = rtype->failable;
+	Type *real_return_type = is_failable ? type_anyerr : rtype;
+	ABIArgInfo *ret_arg_info = is_failable ? signature->failable_abi_info : signature->ret_abi_info;
 
 	ret_arg_info->param_index_end = 0;
 	ret_arg_info->param_index_start = 0;
@@ -276,7 +279,7 @@ LLVMTypeRef llvm_func_type(GenContext *context, Type *type)
 	}
 
 	// If it's failable and it's not void (meaning ret_abi_info will be NULL)
-	if (signature->failable && signature->ret_abi_info)
+	if (is_failable && signature->ret_abi_info)
 	{
 		add_func_type_param(context, type_get_ptr(signature->rtype->type), signature->ret_abi_info, &params);
 	}
@@ -309,6 +312,9 @@ LLVMTypeRef llvm_get_type(GenContext *c, Type *any_type)
 	switch (any_type->type_kind)
 	{
 		case CT_TYPES:
+			UNREACHABLE
+		case TYPE_FAILABLE:
+			// If this is reachable, then we're not doing the proper lowering.
 			UNREACHABLE
 		case TYPE_TYPEID:
 		case TYPE_ANYERR:

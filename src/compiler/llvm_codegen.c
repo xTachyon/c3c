@@ -262,7 +262,7 @@ static void gencontext_emit_global_variable_definition(GenContext *c, Decl *decl
 	{
 		decl->backend_ref = LLVMAddGlobal(c->module, llvm_get_type(c, decl->type), "tempglobal");
 	}
-	if (decl->var.failable)
+	if (IS_FAILABLE(decl))
 	{
 		scratch_buffer_clear();
 		scratch_buffer_append(decl->external_name);
@@ -359,7 +359,7 @@ void llvm_emit_global_variable_init(GenContext *c, Decl *decl)
 	{
 		llvm_set_alignment(failable_ref, type_alloca_alignment(type_anyerr));
 	}
-	if (decl->var.init_expr && decl->var.init_expr->failable)
+	if (decl->var.init_expr && IS_FAILABLE(decl->var.init_expr))
 	{
 		UNREACHABLE
 	}
@@ -789,7 +789,7 @@ void llvm_value_set_decl_address(BEValue *value, Decl *decl)
 	llvm_value_set_address(value, decl_ref(decl), decl->type);
 	value->alignment = decl->alignment;
 
-	if (decl->decl_kind == DECL_VAR && decl->var.failable)
+	if (decl->decl_kind == DECL_VAR && IS_FAILABLE(decl))
 	{
 		value->kind = BE_ADDRESS_FAILABLE;
 		value->failable = decl->var.failable_ref;

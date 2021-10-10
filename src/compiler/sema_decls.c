@@ -593,6 +593,9 @@ static inline bool sema_analyse_distinct(Context *context, Decl *decl)
 		case CT_TYPES:
 			UNREACHABLE
 			return false;
+		case TYPE_FAILABLE:
+			SEMA_ERROR(decl, "You cannot create a distinct type from a failable.");
+			return false;
 		case TYPE_VIRTUAL_ANY:
 		case TYPE_VIRTUAL:
 			SEMA_ERROR(decl, "You cannot create a distinct type from a virtual type.");
@@ -1374,7 +1377,7 @@ bool sema_analyse_var_decl(Context *context, Decl *decl)
 			decl->resolve_status = RESOLVE_DONE;
 			if (!decl->alignment) decl->alignment = type_alloca_alignment(decl->type);
 		}
-		if (!sema_expr_analyse_assign_right_side(context, NULL, decl->type, init, decl->var.failable || decl->var.unwrap ? FAILABLE_YES : FAILABLE_NO)) return decl_poison(decl);
+		if (!sema_expr_analyse_assign_right_side(context, NULL, decl->type, init, decl->type->type_kind == TYPE_FAILABLE || decl->var.unwrap ? FAILABLE_YES : FAILABLE_NO)) return decl_poison(decl);
 
 		if (type_is_inferred)
 		{
@@ -1399,7 +1402,7 @@ bool sema_analyse_var_decl(Context *context, Decl *decl)
 		}
 		else
 		{
-			if (decl->var.unwrap && !init->failable)
+			if (decl->var.unwrap && init->type->type_kind != TYPE_FAILABLE)
 			{
 				SEMA_ERROR(decl->var.init_expr, "A failable expression was expected here.");
 				return decl_poison(decl);
