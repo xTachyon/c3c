@@ -12,7 +12,7 @@ static struct
 	Type f16, f32, f64, f128, fxx;
 	Type usz, isz, uptr, iptr, uptrdiff, iptrdiff;
 	Type voidstar, typeid, anyerr, typeinfo, ctlist;
-	Type str, virtual, virtual_generic;
+	Type str, virtual, virtual_generic, anyfail;
 } t;
 
 Type *type_bool = &t.u1;
@@ -47,6 +47,7 @@ Type *type_compfloat = &t.fxx;
 Type *type_compstr = &t.str;
 Type *type_anyerr = &t.anyerr;
 Type *type_complist = &t.ctlist;
+Type *type_anyfail = &t.anyfail;
 
 static unsigned size_subarray;
 static AlignSize alignment_subarray;
@@ -900,11 +901,13 @@ static Type *type_generate_inferred_array(Type *arr_type, bool canonical)
 
 Type *type_get_ptr(Type *ptr_type)
 {
+	assert(ptr_type->type_kind != TYPE_FAILABLE);
 	return type_generate_ptr(ptr_type, false);
 }
 
 Type *type_get_failable(Type *failable_type)
 {
+	assert(failable_type->type_kind != TYPE_FAILABLE);
 	return type_generate_failable(failable_type, false);
 }
 
@@ -1333,6 +1336,7 @@ void type_setup(PlatformTarget *target)
 
 	type_create("typeinfo", &t.typeinfo, TYPE_TYPEINFO, 1, 1, 1);
 	type_create("complist", &t.ctlist, TYPE_UNTYPED_LIST, 1, 1, 1);
+	t.anyfail = (Type){ .type_kind = TYPE_FAILABLE, .failable = type_void };
 	type_init("typeid", &t.typeid, TYPE_TYPEID, target->width_pointer, target->align_pointer);
 
 	type_init("void*", &t.voidstar, TYPE_POINTER, target->width_pointer, target->align_pointer);
@@ -1686,7 +1690,7 @@ Type *type_find_common_ancestor(Type *left, Type *right)
 	if (left->type_kind == TYPE_POINTER)
 	{
 		Type *common = type_find_common_ancestor(left->pointer, right->pointer);
-		return common ? type_generate_ptr(common, true) : NULL;
+		return common ? type_get_ptr(common) : NULL;
 	}
 	if (left->type_kind != TYPE_STRUCT) return NULL;
 

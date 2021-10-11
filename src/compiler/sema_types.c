@@ -214,7 +214,6 @@ bool sema_resolve_type(Context *context, Type *type)
 		case TYPE_VIRTUAL:
 			TODO;
 		case TYPE_FAILABLE:
-			if (!type->failable) return true;
 			return sema_resolve_type(context, type->failable);
 	}
 	return sema_analyse_decl(context, type->decl);

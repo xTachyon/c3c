@@ -1552,6 +1552,7 @@ extern Type *type_u128, *type_i128;
 extern Type *type_typeid, *type_anyerr, *type_typeinfo;
 extern Type *type_virtual, *type_virtual_generic;
 extern Type *type_complist;
+extern Type *type_anyfail;
 
 extern const char *attribute_list[NUMBER_OF_ATTRIBUTES];
 
@@ -1692,6 +1693,7 @@ static inline bool type_may_negate(Type *type)
 }
 
 
+bool cast_implicit_ignore_failable(Expr *expr, Type *to_type);
 bool cast_implicit(Expr *expr, Type *to_type);
 bool cast(Expr *expr, Type *to_type);
 
@@ -1879,7 +1881,8 @@ bool sema_erase_var(Context *context, Decl *decl);
 bool sema_erase_unwrapped(Context *context, Decl *decl);
 bool sema_analyse_cond_expr(Context *context, Expr *expr);
 bool sema_analyse_assigned_expr(Context *context, Type *to, Expr *expr, bool may_be_failable);
-bool sema_analyse_expr_of_required_type(Context *context, Type *to, Expr *expr, bool may_be_failable);
+
+bool sema_analyse_expr_of_required_type(Context *context, Type *to, Expr *expr);
 ArrayIndex sema_get_initializer_const_array_size(Context *context, Expr *initializer, bool *may_be_array, bool *is_const_size);
 bool sema_analyse_expr(Context *context, Expr *expr);
 bool sema_analyse_inferred_expr(Context *context, Type *to, Expr *expr);
@@ -1887,7 +1890,7 @@ bool sema_analyse_decl(Context *context, Decl *decl);
 bool sema_analyse_var_decl(Context *context, Decl *decl);
 bool sema_analyse_ct_assert_stmt(Context *context, Ast *statement);
 bool sema_analyse_statement(Context *context, Ast *statement);
-bool sema_expr_analyse_assign_right_side(Context *context, Expr *expr, Type *left_type, Expr *right, ExprFailableStatus lhs_is_failable);
+bool sema_expr_analyse_assign_right_side(Context *context, Expr *expr, Type *left_type, Expr *right, bool is_unwrapped_var);
 
 bool sema_expr_analyse_general_call(Context *context, Expr *expr, Decl *decl, Expr *struct_var, bool is_macro, bool failable);
 Decl *sema_resolve_symbol_in_current_dynamic_scope(Context *context, const char *symbol);
@@ -2040,7 +2043,7 @@ static inline Type *type_reduced_from_expr(Expr *expr)
 
 static inline Type *type_no_fail(Type *type)
 {
-	return type->type_kind == TYPE_FAILABLE ? type->failable : type;
+	return type && type->type_kind == TYPE_FAILABLE ? type->failable : type;
 }
 
 static inline bool type_is_pointer_sized_or_more(Type *type)
@@ -2058,6 +2061,7 @@ static inline bool type_is_pointer_sized(Type *type)
  if (k_ == TYPE_TYPEDEF) k_ = (t_)->canonical->type_kind;
 
 #define IS_FAILABLE(element_) ((element_)->type->type_kind == TYPE_FAILABLE)
+#define TYPE_IS_FAILABLE(type_) (type_->type_kind == TYPE_FAILABLE)
 
 static inline Type *type_with_added_failability(Expr *expr, bool add_failable)
 {

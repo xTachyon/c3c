@@ -3872,12 +3872,13 @@ static inline void gencontext_emit_failable(GenContext *context, BEValue *be_val
 	llvm_emit_br(context, context->catch_block);
 	LLVMBasicBlockRef ignored_block = llvm_basic_block_new(context, "postfailed");
 	llvm_emit_block(context, ignored_block);
-	if (expr->type->canonical == type_void)
+	Type *type = type_no_fail(expr->type);
+	if (type->canonical == type_void)
 	{
 		llvm_value_set(be_value, NULL, type_void);
 		return;
 	}
-	llvm_value_set(be_value, LLVMGetUndef(llvm_get_type(context, expr->type)), expr->type);
+	llvm_value_set(be_value, LLVMGetUndef(llvm_get_type(context, type)), type);
 }
 
 static inline LLVMValueRef llvm_update_vector(GenContext *c, LLVMValueRef vector, LLVMValueRef value, ArrayIndex index, bool *is_const)

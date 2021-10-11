@@ -394,6 +394,10 @@ static void expr_unify_binary_properties(Expr *expr, Expr *left, Expr *right)
 static void expr_unify_binary(Expr *expr, Expr *left, Expr *right)
 {
 	expr->type = left->type;
+	if (right->type->type_kind == TYPE_FAILABLE && expr->type->type_kind != TYPE_FAILABLE)
+	{
+		expr->type = type_get_failable(expr->type);
+	}
 	expr_unify_binary_properties(expr, left, right);
 }
 
@@ -586,14 +590,14 @@ static inline bool sema_cast_ident_rvalue(Context *context, Type *to, Expr *expr
 	return true;
 }
 
-static ExprFailableStatus expr_is_failable(Expr *expr)
+static bool expr_is_unwrapped_ident(Expr *expr)
 {
-	if (expr->expr_kind != EXPR_IDENTIFIER) return FAILABLE_NO;
+	if (expr->expr_kind != EXPR_IDENTIFIER) return false;
 	Decl *decl = expr->identifier_expr.decl;
-	if (decl->decl_kind != DECL_VAR) return FAILABLE_NO;
-	if (decl->var.kind == VARDECL_UNWRAPPED && decl->var.alias->type->type_kind == TYPE_FAILABLE) return FAILABLE_UNWRAPPED;
-	return IS_FAILABLE(decl) ? FAILABLE_YES : FAILABLE_NO;
+	if (decl->decl_kind != DECL_VAR) return false;
+	return decl->var.kind == VARDECL_UNWRAPPED && IS_FAILABLE(decl->var.alias);
 }
+
 
 
 static inline bool sema_type_error_on_binop(Expr *expr)
@@ -1313,7 +1317,7 @@ static inline bool sema_expr_analyse_call_invocation(Context *context, Expr *cal
 		{
 			case VARDECL_PARAM_REF:
 				// &foo
-				if (!sema_analyse_expr_value(context, param->type, arg)) return false;
+				if (!sema_analyse_expr_lvalue(context, arg)) return false;
 				if (param->type && param->type->canonical != arg->type->canonical)
 				{
 					SEMA_ERROR(arg, "'%s' cannot be implicitly cast to '%s'.", type_to_error_string(arg->type), type_to_error_string(param->type));
@@ -1323,6 +1327,7 @@ static inline bool sema_expr_analyse_call_invocation(Context *context, Expr *cal
 			case VARDECL_PARAM:
 				// foo
 				if (!sema_analyse_assigned_expr(context, param->type, arg, true)) return false;
+				if (IS_FAILABLE(arg)) *failable = true;
 				if (callee.macro)
 				{
 					param->alignment = type_abi_alignment(param->type ? param->type : arg->type);
@@ -1336,6 +1341,7 @@ static inline bool sema_expr_analyse_call_invocation(Context *context, Expr *cal
 				SCOPE_START
 					if (!sema_analyse_assigned_expr(context, param->type, arg, true)) return SCOPE_POP_ERROR();
 				SCOPE_END;
+				if (IS_FAILABLE(arg)) *failable = true;
 				break;
 			case VARDECL_PARAM_CT:
 				// $foo
@@ -1349,7 +1355,7 @@ static inline bool sema_expr_analyse_call_invocation(Context *context, Expr *cal
 				break;
 			case VARDECL_PARAM_CT_TYPE:
 				// $Foo
-				if (!sema_analyse_expr_value(context, NULL, arg)) return false;
+				if (!sema_analyse_expr_lvalue(context, arg)) return false;
 				// TODO check typeof
 				if (arg->expr_kind != EXPR_TYPEINFO)
 				{
@@ -1368,17 +1374,8 @@ static inline bool sema_expr_analyse_call_invocation(Context *context, Expr *cal
 			case VARDECL_ERASE:
 				UNREACHABLE
 		}
-		if (param->type)
-		{
-			if (!cast_implicit(arg, param->type)) return false;
-		}
-		else
-		{
-			param->type = arg->type;
-		}
-		*failable |= IS_FAILABLE(arg);
+		if (!param->type) param->type = type_no_fail(arg->type);
 	}
-
 	return true;
 }
 static inline bool sema_expr_analyse_func_invocation(Context *context, FunctionSignature *signature, Expr *expr, Decl *decl,
@@ -1923,7 +1920,7 @@ static inline bool sema_expr_analyse_call(Context *context, Type *to, Expr *expr
 	{
 		return sema_analyse_body_expansion(context, expr);
 	}
-	bool failable = IS_FAILABLE(func_expr);
+	bool failable = func_expr->type && IS_FAILABLE(func_expr);
 	Decl *decl;
 	Expr *struct_var = NULL;
 	bool macro = false;
@@ -3371,7 +3368,7 @@ static inline bool sema_expr_analyse_untyped_initializer(Context *context, Expr 
 	}
 	if (no_common_elements || is_const)
 	{
-		expr_set_type(initializer, type_complist);
+		initializer->type = type_complist;
 		return true;
 	}
 	initializer->type = type_get_opt_fail(type_get_array(element_type, element_count), failable);
@@ -3510,13 +3507,14 @@ static inline bool sema_expr_analyse_cast(Context *context, Expr *expr)
 	return true;
 }
 
-static inline bool sema_expr_analyse_slice_assign(Context *context, Expr *expr, Type *left_type, Expr *right, ExprFailableStatus lhs_is_failable)
+static inline bool sema_expr_analyse_slice_assign(Context *context, Expr *expr, Type *left_type, Expr *right, bool is_unwrapped)
 {
 	// 1. Evaluate right side to required type.
-	if (!sema_analyse_assigned_expr(context, left_type->array.base, right, lhs_is_failable != FAILABLE_NO)) return false;
+	Type *left_no_fail = type_no_fail(left_type);
+	if (!sema_analyse_assigned_expr(context, left_no_fail->array.base, right, TYPE_IS_FAILABLE(left_type))) return false;
 
 	Expr *left = expr->binary_expr.left;
-	expr_copy_types(expr, right);
+	expr->type = right->type;
 	expr->expr_kind = EXPR_SLICE_ASSIGN;
 	expr->slice_assign_expr.left = left;
 	expr->slice_assign_expr.right = right;
@@ -3524,24 +3522,25 @@ static inline bool sema_expr_analyse_slice_assign(Context *context, Expr *expr, 
 	return true;
 }
 
-bool sema_expr_analyse_assign_right_side(Context *context, Expr *expr, Type *left_type, Expr *right, ExprFailableStatus lhs_is_failable)
+bool sema_expr_analyse_assign_right_side(Context *context, Expr *expr, Type *left_type, Expr *right, bool is_unwrapped)
 {
 	if (expr && expr->binary_expr.left->expr_kind == EXPR_SLICE)
 	{
-		return sema_expr_analyse_slice_assign(context, expr, left_type, right, lhs_is_failable);
+		return sema_expr_analyse_slice_assign(context, expr, left_type, right, is_unwrapped);
 	}
 
 	// 1. Evaluate right side to required type.
-	if (!sema_analyse_inferred_expr(context, left_type, right)) return false;
-	if (IS_FAILABLE(right) && lhs_is_failable != FAILABLE_YES)
+	Type *no_fail_left_type = type_no_fail(left_type);
+	if (!sema_analyse_inferred_expr(context, no_fail_left_type, right)) return false;
+	if (IS_FAILABLE(right) && !TYPE_IS_FAILABLE(left_type))
 	{
-		if (lhs_is_failable == FAILABLE_UNWRAPPED)
+		if (is_unwrapped)
 		{
 			SEMA_ERROR(expr->binary_expr.left, "The variable is unwrapped in this context, if you don't want to unwrap it, use () around the variable to suppress unwrapping, like 'catch err = (x)' and 'try (x)'.");
 			return false;
 		}
-		if (!left_type) left_type = right->type;
-		SEMA_ERROR(right, "'%s!' cannot be converted into '%s'.", type_to_error_string(right->type), type_to_error_string(left_type));
+		if (!left_type) left_type = type_no_fail(right->type);
+		SEMA_ERROR(right, "%s cannot be converted to %s.", type_quoted_error_string(right->type), type_quoted_error_string(left_type));
 		return false;
 	}
 
@@ -3558,7 +3557,7 @@ bool sema_expr_analyse_assign_right_side(Context *context, Expr *expr, Type *lef
 	} while (0);
 
 	// 3. Set the result to the type on the right side.
-	if (expr) expr_copy_types(expr, right);
+	if (expr) expr->type = right->type;
 
 	return true;
 }
@@ -3615,7 +3614,7 @@ static bool sema_expr_analyse_ct_identifier_assign(Context *context, Expr *expr,
 	if (!sema_expr_analyse_ct_identifier_lvalue(context, left)) return false;
 
 	// 3. Evaluate right side to required type.
-	if (!sema_expr_analyse_assign_right_side(context, expr, left->type, right, true)) return false;
+	if (!sema_expr_analyse_assign_right_side(context, expr, left->type, right, false)) return false;
 
 	left->ct_ident_expr.decl->var.init_expr = right;
 	expr_replace(expr, right);
@@ -3690,12 +3689,12 @@ static bool sema_expr_analyse_assign(Context *context, Expr *expr, Expr *left, E
 		return false;
 	}
 
-	ExprFailableStatus failable_status = expr_is_failable(left);
+	bool is_unwrapped_var = expr_is_unwrapped_ident(left);
 
 	// 3. Evaluate right side to required type.
-	if (!sema_expr_analyse_assign_right_side(context, expr, left->type, right, failable_status)) return false;
+	if (!sema_expr_analyse_assign_right_side(context, expr, left->type, right, is_unwrapped_var)) return false;
 
-	if (failable_status == FAILABLE_UNWRAPPED && IS_FAILABLE(right))
+	if (is_unwrapped_var && IS_FAILABLE(right))
 	{
 		return sema_rewrap_var(context, left->identifier_expr.decl);
 	}
@@ -3752,7 +3751,7 @@ static bool sema_expr_analyse_common_assign(Context *context, Expr *expr, Expr *
 	}
 
 	// 1. Analyse left side.
-	if (!sema_analyse_expr_value(context, NULL, left)) return false;
+	if (!sema_analyse_expr_lvalue(context, left)) return false;
 
 	// 2. Verify that the left side is assignable.
 	if (!expr_is_ltype(left))
@@ -3761,22 +3760,24 @@ static bool sema_expr_analyse_common_assign(Context *context, Expr *expr, Expr *
 		return false;
 	}
 
+	Type *no_fail = type_no_fail(left->type);
+
 	// 3. If this is only defined for ints (*%, ^= |= &= %=) verify that this is an int.
-	if (int_only && !type_is_integer(left->type))
+	if (int_only && !type_is_integer(no_fail))
 	{
 		SEMA_ERROR(left, "Expected an integer here.");
 		return false;
 	}
 
 	// 4. In any case, these ops are only defined on numbers.
-	if (!type_underlying_is_numeric(left->type))
+	if (!type_underlying_is_numeric(no_fail))
 	{
 		SEMA_ERROR(left, "Expected a numeric type here.");
 		return false;
 	}
 
 	// 5. Cast the right hand side to the one on the left
-	if (!sema_analyse_assigned_expr(context, left->type->canonical, right, expr_is_failable(left))) return false;
+	if (!sema_analyse_assigned_expr(context, no_fail, right, IS_FAILABLE(left))) return false;
 
 	// 6. Check for zero in case of div or mod.
 	if (right->expr_kind == EXPR_CONST)
@@ -3821,7 +3822,7 @@ static bool sema_expr_analyse_common_assign(Context *context, Expr *expr, Expr *
 	}
 
 	// 7. Assign type
-	expr_copy_types(expr, left);
+	expr->type = left->type;
 	return true;
 }
 
@@ -3918,7 +3919,7 @@ static bool binary_arithmetic_promotion(Context *context, Expr *left, Expr *righ
 		SEMA_ERROR(parent, error_message, type_quoted_error_string(left->type), type_quoted_error_string(right->type));
 		return false;
 	}
-	return (int)cast_implicit(left, max) & (int)cast_implicit(right, max);
+	return cast_implicit_ignore_failable(left, max) && cast_implicit_ignore_failable(right, max);
 }
 
 static bool sema_check_int_type_fit(Expr *expr, Type *target_type)
@@ -3979,8 +3980,8 @@ static bool sema_expr_analyse_sub(Context *context, Expr *expr, Expr *left, Expr
 	// (iptr)((char*)(ptr) - 1)
 	Type *cast_to_iptr = defer_iptr_cast(left, right);
 
-	Type *left_type = left->type->canonical;
-	Type *right_type = right->type->canonical;
+	Type *left_type = type_no_fail(left->type)->canonical;
+	Type *right_type = type_no_fail(right->type)->canonical;
 
 	// 2. Handle the ptr - x and ptr - other_pointer
 	if (left_type->type_kind == TYPE_POINTER)
@@ -4078,8 +4079,8 @@ static bool sema_expr_analyse_add(Context *context, Expr *expr, Expr *left, Expr
 	Type *cast_to_iptr = defer_iptr_cast(left, right);
 	if (!cast_to_iptr) cast_to_iptr = defer_iptr_cast(right, left);
 
-	Type *left_type = left->type->canonical;
-	Type *right_type = right->type->canonical;
+	Type *left_type = type_no_fail(left->type)->canonical;
+	Type *right_type = type_no_fail(right->type)->canonical;
 
 	// 2. To detect pointer additions, reorder if needed
 	if (right_type->type_kind == TYPE_POINTER && left_type->type_kind != TYPE_POINTER)
@@ -4172,8 +4173,8 @@ static bool sema_expr_analyse_mult(Context *context, Expr *expr, Expr *left, Exp
 	// 1. Analyse the sub expressions.
 	if (!sema_expr_analyse_binary_sub_expr(context, left, right)) return false;
 
-	Type *left_type = left->type->canonical;
-	Type *right_type = right->type->canonical;
+	Type *left_type = type_no_fail(left->type)->canonical;
+	Type *right_type = type_no_fail(right->type)->canonical;
 
 	// 2. Perform promotion to a common type.
 	if (!binary_arithmetic_promotion(context, left, right, left_type, right_type, expr, "Cannot multiply %s by %s"))
@@ -4214,8 +4215,8 @@ static bool sema_expr_analyse_div(Context *context, Expr *expr, Expr *left, Expr
 	// 1. Analyse sub expressions.
 	if (!sema_expr_analyse_binary_sub_expr(context, left, right)) return false;
 
-	Type *left_type = left->type->canonical;
-	Type *right_type = right->type->canonical;
+	Type *left_type = type_no_fail(left->type)->canonical;
+	Type *right_type = type_no_fail(right->type)->canonical;
 
 	// 2. Perform promotion to a common type.
 	if (!binary_arithmetic_promotion(context, left, right, left_type, right_type, expr, "Cannot divide %s by %s."))
@@ -4275,8 +4276,8 @@ static bool sema_expr_analyse_mod(Context *context, Expr *expr, Expr *left, Expr
 	// 1. Analyse both sides.
 	if (!sema_expr_analyse_binary_sub_expr(context, left, right)) return false;
 
-	Type *left_type = left->type->canonical;
-	Type *right_type = right->type->canonical;
+	Type *left_type = type_no_fail(left->type)->canonical;
+	Type *right_type = type_no_fail(right->type)->canonical;
 
 	// 2. Perform promotion to a common type.
 	if (!binary_arithmetic_promotion(context, left, right, left_type, right_type, expr, "Cannot divide %s by %s."))
@@ -4321,8 +4322,8 @@ static bool sema_expr_analyse_bit(Context *context, Expr *expr, Expr *left, Expr
 
 	// 3. Promote to the same type.
 
-	Type *left_type = left->type->canonical;
-	Type *right_type = right->type->canonical;
+	Type *left_type = type_no_fail(left->type)->canonical;
+	Type *right_type = type_no_fail(right->type)->canonical;
 
 	if (!binary_arithmetic_promotion(context, left, right, left_type, right_type, expr, NULL))
 	{
@@ -4517,14 +4518,14 @@ static void cast_to_max_bit_size(Context *context, Expr *left, Expr *right, Type
 		Type *to = left->type->type_kind < TYPE_U8
 				? type_int_signed_by_bitsize(bit_size_right)
 				: type_int_unsigned_by_bitsize(bit_size_right);
-		bool success = cast_implicit(left, to);
+		bool success = cast_implicit_ignore_failable(left, to);
 		assert(success);
 		return;
 	}
 	Type *to = right->type->type_kind < TYPE_U8
 	           ? type_int_signed_by_bitsize(bit_size_left)
 	           : type_int_unsigned_by_bitsize(bit_size_left);
-	bool success = cast_implicit(right, to);
+	bool success = cast_implicit_ignore_failable(right, to);
 	assert(success);
 }
 
@@ -4539,6 +4540,7 @@ static bool sema_expr_analyse_comp(Context *context, Expr *expr, Expr *left, Exp
 
 	bool is_equality_type_op = expr->binary_expr.operator == BINARYOP_NE || expr->binary_expr.operator == BINARYOP_EQ;
 
+	// Flatten enum/distinct/failable
 	Type *left_type = type_flatten(left->type);
 	Type *right_type = type_flatten(right->type);
 
@@ -4570,7 +4572,7 @@ static bool sema_expr_analyse_comp(Context *context, Expr *expr, Expr *left, Exp
 	}
 
 	// 3. In the normal case, treat this as a binary op, finding the max type.
-	Type *max = type_find_max_type(left->type->canonical, right->type->canonical);
+	Type *max = type_find_max_type(type_no_fail(left->type)->canonical, type_no_fail(right->type)->canonical);
 
 	// 4. If no common type, then that's an error:
 	if (!max)
@@ -4607,8 +4609,8 @@ static bool sema_expr_analyse_comp(Context *context, Expr *expr, Expr *left, Exp
 	}
 
 	// 6. Do the implicit cast.
-	if (!cast_implicit(left, max)) goto ERR;
-	if (!cast_implicit(right, max)) goto ERR;
+	if (!cast_implicit_ignore_failable(left, max)) goto ERR;
+	if (!cast_implicit_ignore_failable(right, max)) goto ERR;
 DONE:
 
 	// 7. Do constant folding.
@@ -4622,13 +4624,12 @@ DONE:
 	// 8. Set the type to bool
 	expr_unify_binary_properties(expr, left, right);
 
-	// 8a. Except for vector, set to signed type with the correct size.
-	if (left_type->type_kind == TYPE_VECTOR)
-	{
-		expr_set_type(expr, type_get_vector_bool(left_type));
-		return true;
-	}
-	expr_set_type(expr, type_bool);
+	bool is_failable = IS_FAILABLE(left) || IS_FAILABLE(right);
+
+	Type *return_type = left_type->type_kind == TYPE_VECTOR ? type_get_vector_bool(left_type) : type_bool;
+
+	expr->type = type_get_opt_fail(return_type, is_failable);
+
 	return true;
 
 	ERR:
@@ -4642,7 +4643,8 @@ DONE:
  */
 static bool sema_expr_analyse_deref(Context *context, Expr *expr, Expr *inner)
 {
-	Type *canonical = inner->type->canonical;
+	Type *inner_type_nofail = type_no_fail(inner->type);
+	Type *canonical = inner_type_nofail->canonical;
 	// 1. Check that we have a pointer, or dereference is not allowed.
 	if (canonical->type_kind != TYPE_POINTER)
 	{
@@ -4662,10 +4664,11 @@ static bool sema_expr_analyse_deref(Context *context, Expr *expr, Expr *inner)
 	}
 	// 3. Now the type might not be a pointer because of a typedef,
 	//    otherwise we need to use the canonical representation.
-	Type *deref_type = inner->type->type_kind != TYPE_POINTER ? inner->type : canonical;
+
+	Type *deref_type = inner_type_nofail->type_kind == TYPE_POINTER ? inner_type_nofail : canonical;
 
 	// 4. And... set the type.
-	expr_set_type(expr, deref_type->pointer);
+	expr->type = type_get_opt_fail(deref_type->pointer, IS_FAILABLE(inner));
 	expr_copy_properties(expr, inner);
 
 	return true;
@@ -4902,20 +4905,22 @@ VALID_VEC:
 
 static bool sema_expr_analyse_not(Expr *expr, Expr *inner)
 {
-	if (type_is_vector(inner->type))
+	Type *type = type_no_fail(inner->type);
+	if (type_is_vector(type))
 	{
 		expr_copy_properties(expr, inner);
-		expr_set_type(expr, type_get_vector_bool(inner->type));
+		expr->type = type_get_opt_fail(type_get_vector_bool(type), IS_FAILABLE(inner));
 		return true;
 	}
-	if (!cast_may_implicit(inner->type, type_bool))
+	if (!cast_may_implicit(type, type_bool))
 	{
 		SEMA_ERROR(expr, "The use of '!' on %s is not allowed as it can't be converted to a boolean value.", type_quoted_error_string(inner->type));
 		return false;
 	}
-	if (!cast_implicit(inner, type_bool)) return false;
+	expr->type = type_get_opt_fail(type_bool, IS_FAILABLE(inner));
 	expr_copy_properties(expr, inner);
-	expr_set_type(expr, type_bool);
+
+	if (!cast_implicit(inner, expr->type)) return false;
 
 	if (inner->expr_kind == EXPR_CONST)
 	{
@@ -5170,8 +5175,7 @@ static inline bool sema_expr_analyse_try_assign(Context *context, Expr *expr, bo
 			SEMA_ERROR(lhs, "This expression is not assignable, did you make a mistake?");
 			return false;
 		}
-		ExprFailableStatus failable_status = expr_is_failable(lhs);
-		if (failable_status == FAILABLE_YES)
+		if (IS_FAILABLE(lhs))
 		{
 			SEMA_ERROR(lhs, "A 'try' assignment is not possible with failable on the left hand side, did you intend 'try (variable = expr)'?");
 			return false;
@@ -5179,6 +5183,7 @@ static inline bool sema_expr_analyse_try_assign(Context *context, Expr *expr, bo
 		lhs_type = lhs->type;
 	}
 
+	lhs_type = type_no_fail(lhs_type);
 	if (expr->try_assign_expr.is_try)
 	{
 		if (!sema_analyse_assigned_expr(context, lhs_type, init, true)) return false;
@@ -5268,16 +5273,20 @@ static inline bool sema_expr_analyse_else(Context *context, Expr *expr)
 
 	expr->type = common;
 
-	return cast_implicit(expr->else_expr.expr, common);
+	return true;
 }
 
 static inline bool sema_expr_analyse_guard(Context *context, Type *infer_type, Expr *expr)
 {
 	Expr *inner = expr->guard_expr.inner;
-	bool success = sema_analyse_inferred_expr(context, infer_type, inner);
+	if (!sema_analyse_inferred_expr(context, infer_type, inner)) return false;
 	expr->guard_expr.defer = context->active_scope.defer_last;
-	if (!success) return false;
-	expr_copy_types(expr, inner);
+	if (inner->type == type_anyfail)
+	{
+		SEMA_ERROR(expr, "This expression will always throw, which isn't allowed.");
+		return false;
+	}
+	expr->type = type_no_fail(inner->type);
 	expr->pure = false;
 
 	if (!IS_FAILABLE(inner))
@@ -5285,11 +5294,13 @@ static inline bool sema_expr_analyse_guard(Context *context, Type *infer_type, E
 		SEMA_ERROR(expr, "No failable to rethrow before '!!' in the expression, please remove '!!'.");
 		return false;
 	}
+
 	if (context->rtype->type_kind != TYPE_FAILABLE)
 	{
 		SEMA_ERROR(expr, "This expression implicitly returns with a failable result, but the function does not allow failable results. Did you mean to use 'else' instead?");
 		return false;
 	}
+
 	return true;
 }
 
@@ -5419,14 +5430,7 @@ static inline bool sema_expr_analyse_failable(Context *context, Type *to, Expr *
 		SEMA_ERROR(inner, "You cannot use the '!' operator on expressions of type '%s'", type_to_error_string(type));
 		return false;
 	}
-	if (!to)
-	{
-		REMINDER("Fix this");
-		expr_set_type(expr, type_void);
-		return true;
-	}
-
-	expr->type = type_get_failable(to);
+	expr->type = to ? type_get_failable(to) : type_anyfail;
 	return true;
 }
 
@@ -6372,11 +6376,18 @@ static inline bool sema_analyse_expr_dispatch(Context *context, Type *infer_type
 bool sema_analyse_assigned_expr(Context *context, Type *to, Expr *expr, bool may_be_failable)
 {
 	if (!sema_analyse_inferred_expr(context, to, expr)) return false;
-	if (IS_FAILABLE(expr) && !may_be_failable)
+	if (IS_FAILABLE(expr))
 	{
-		if (!to) to = expr->type;
-		SEMA_ERROR(expr, "%s cannot be converted into %s.", type_quoted_error_string(expr->type), type_quoted_error_string(to));
-		return false;
+		if (!may_be_failable)
+		{
+			if (!to) to = expr->type;
+			SEMA_ERROR(expr, "%s cannot be converted to %s.", type_quoted_error_string(expr->type), type_quoted_error_string(to));
+			return false;
+		}
+		if (to && to->type_kind != TYPE_FAILABLE)
+		{
+			to = type_get_failable(to);
+		}
 	}
 	return to ? cast_implicit(expr, to) : true;
 }
@@ -6386,27 +6397,23 @@ bool sema_analyse_cond_expr(Context *context, Expr *expr)
 	if (!sema_analyse_expr(context, expr)) return false;
 	if (IS_FAILABLE(expr))
 	{
-		SEMA_ERROR(expr, "%s cannot be converted into %s.", type_quoted_error_string(expr->type), type_quoted_error_string(type_bool));
+		SEMA_ERROR(expr, "%s cannot be converted to %s.", type_quoted_error_string(expr->type), type_quoted_error_string(type_bool));
 		return false;
 	}
 	return cast_implicit(expr, type_bool);
 }
 
-bool sema_analyse_expr_of_required_type(Context *context, Type *to, Expr *expr, bool may_be_failable)
+bool sema_analyse_expr_of_required_type(Context *context, Type *to, Expr *expr)
 {
-	if (!sema_analyse_inferred_expr(context, to, expr)) return false;
+	Type *no_fail_type = type_no_fail(to);
+	if (!sema_analyse_inferred_expr(context, no_fail_type, expr)) return false;
 	if (IS_FAILABLE(expr))
 	{
-		if (!may_be_failable)
+		if (no_fail_type && to->type_kind != TYPE_FAILABLE)
 		{
 			if (!to) to = expr->type;
-			SEMA_ERROR(expr, "%s cannot be converted into %s.", type_quoted_error_string(expr->type), type_quoted_error_string(to));
+			SEMA_ERROR(expr, "%s cannot be converted to %s.", type_quoted_error_string(expr->type), type_quoted_error_string(to));
 			return false;
-		}
-		if (to->type_kind != TYPE_FAILABLE)
-		{
-			// Quickfix.
-			to = type_get_failable(to);
 		}
 	}
 	return to ? cast_implicit(expr, to) : true;
@@ -6462,6 +6469,11 @@ static inline bool sema_cast_rvalue(Context *context, Type *to, Expr *expr)
 			break;
 	}
 	return true;
+}
+
+bool sema_analyse_expr_lvalue(Context *context, Expr *expr)
+{
+	return sema_analyse_expr_value(context, NULL, expr);
 }
 
 bool sema_analyse_expr_value(Context *context, Type *to, Expr *expr)

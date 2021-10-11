@@ -395,12 +395,13 @@ bool cast_may_explicit(Type *from_type, Type *to_type)
 	Type *from = from_type;
 	Type *to = to_type;
 
-	if (from_type->type_kind == TYPE_FAILABLE)
+	if (from_type->type_kind == TYPE_FAILABLE && to_type->type_kind != TYPE_FAILABLE)
 	{
-		if (to_type->type_kind != TYPE_FAILABLE) return false;
-		from = from->failable;
-		if (!from) return true;
-		to = to->failable;
+		return false;
+	}
+	if (to_type->type_kind == TYPE_FAILABLE)
+	{
+		return cast_may_explicit(type_no_fail(from_type), to_type->failable);
 	}
 
 	// 1. We flatten the distinct types, since they should be freely convertible
@@ -533,6 +534,12 @@ bool cast_may_implicit(Type *from_type, Type *to_type)
 
 	// 1. Same canonical type - we're fine.
 	if (from == to) return true;
+
+	if (from->type_kind == TYPE_FAILABLE && to->type_kind != TYPE_FAILABLE) return false;
+	if (to->type_kind == TYPE_FAILABLE)
+	{
+		return cast_may_implicit(type_no_fail(from), type_no_fail(to));
+	}
 
 	// 2. Handle floats
 	if (type_is_float(to))
@@ -1038,6 +1045,15 @@ Expr *recursive_may_narrow_int(Expr *expr, Type *type)
 		}
 	}
 }
+bool cast_implicit_ignore_failable(Expr *expr, Type *to_type)
+{
+	if (expr->type->type_kind == TYPE_FAILABLE && to_type->type_kind != TYPE_FAILABLE)
+	{
+		to_type = type_get_failable(to_type);
+	}
+	return cast_implicit(expr, to_type);
+}
+
 bool cast_implicit(Expr *expr, Type *to_type)
 {
 	Type *expr_canonical = expr->type->canonical;
@@ -1047,6 +1063,11 @@ bool cast_implicit(Expr *expr, Type *to_type)
 	{
 		if (!cast_may_explicit(expr_canonical, to_canonical))
 		{
+			if (expr_canonical->type_kind == TYPE_FAILABLE && to_canonical->type_kind != TYPE_FAILABLE)
+			{
+				SEMA_ERROR(expr, "A failable %s cannot be converted to %s.", type_quoted_error_string(expr->type), type_quoted_error_string(to_type));
+				return false;
+			}
 			SEMA_ERROR(expr, "You cannot cast %s into %s even with an explicit cast, so this looks like an error.", type_quoted_error_string(expr->type), type_quoted_error_string(to_type));
 			return false;
 		}
@@ -1199,7 +1220,11 @@ bool cast(Expr *expr, Type *to_type)
 	Type *to = type_flatten(to_type);
 	if (from_type == to)
 	{
-		expr_set_type(expr, to_type);
+		if (!IS_FAILABLE(expr) && to_type->type_kind == TYPE_FAILABLE)
+		{
+			to_type = type_no_fail(to_type);
+		}
+		expr->type = to_type;
 		if (expr->expr_kind == EXPR_CONST) expr->const_expr.narrowable = false;
 		return true;
 	}

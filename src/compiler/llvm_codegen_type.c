@@ -281,7 +281,7 @@ LLVMTypeRef llvm_func_type(GenContext *context, Type *type)
 	// If it's failable and it's not void (meaning ret_abi_info will be NULL)
 	if (is_failable && signature->ret_abi_info)
 	{
-		add_func_type_param(context, type_get_ptr(signature->rtype->type), signature->ret_abi_info, &params);
+		add_func_type_param(context, type_get_ptr(rtype), signature->ret_abi_info, &params);
 	}
 
 	// Add in all of the required arguments.

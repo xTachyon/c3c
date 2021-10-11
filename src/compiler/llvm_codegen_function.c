@@ -348,18 +348,19 @@ void llvm_emit_return_abi(GenContext *c, BEValue *return_value, BEValue *failabl
 
 void llvm_emit_return_implicit(GenContext *c)
 {
-	if (c->cur_func_decl->func_decl.function_signature.rtype->type != type_void)
+	Type *rtype_real = c->cur_func_decl->func_decl.function_signature.rtype->type;
+	if (type_lowering(type_no_fail(rtype_real)) != type_void)
 	{
 		LLVMBuildUnreachable(c->builder);
 		return;
 	}
-	if (!IS_FAILABLE(c->cur_func_decl->func_decl.function_signature.rtype))
+	if (rtype_real->type_kind == TYPE_FAILABLE)
 	{
 		llvm_emit_return_abi(c, NULL, NULL);
 		return;
 	}
 	BEValue value;
-	llvm_value_set(&value, LLVMConstNull(llvm_get_type(c, type_anyerr)), type_anyerr);
+	llvm_value_set(&value, llvm_get_zero(c, type_anyerr), type_anyerr);
 	llvm_emit_return_abi(c, NULL, &value);
 }
 

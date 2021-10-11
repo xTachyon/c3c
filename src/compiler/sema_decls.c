@@ -680,7 +680,7 @@ static inline bool sema_analyse_enum(Context *context, Decl *decl)
 		}
 
 		// We try to convert to the desired type.
-		if (!sema_analyse_expr_of_required_type(context, type, expr, false))
+		if (!sema_analyse_expr_of_required_type(context, type, expr))
 		{
 			success = false;
 			enum_value->resolve_status = RESOLVE_DONE;
@@ -1377,7 +1377,8 @@ bool sema_analyse_var_decl(Context *context, Decl *decl)
 			decl->resolve_status = RESOLVE_DONE;
 			if (!decl->alignment) decl->alignment = type_alloca_alignment(decl->type);
 		}
-		if (!sema_expr_analyse_assign_right_side(context, NULL, decl->type, init, decl->type->type_kind == TYPE_FAILABLE || decl->var.unwrap ? FAILABLE_YES : FAILABLE_NO)) return decl_poison(decl);
+
+		if (!sema_expr_analyse_assign_right_side(context, NULL, decl->type, init, false)) return decl_poison(decl);
 
 		if (type_is_inferred)
 		{

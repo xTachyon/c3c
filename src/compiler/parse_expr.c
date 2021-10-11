@@ -1411,10 +1411,11 @@ Expr *parse_type_expression_with_path(Context *context, Path *path)
 		advance_and_verify(context, TOKEN_TYPE_IDENT);
 		RANGE_EXTEND_PREV(type);
 		ASSIGN_TYPE_ELSE(type, parse_type_with_base(context, type), poisoned_expr);
+		type->failable = try_consume(context, TOKEN_BANG);
 	}
 	else
 	{
-		ASSIGN_TYPE_ELSE(type, parse_type(context), poisoned_expr);
+		ASSIGN_TYPE_ELSE(type, parse_failable_type(context), poisoned_expr);
 	}
 	if (!type->virtual_type && TOKEN_IS(TOKEN_LBRACE))
 	{

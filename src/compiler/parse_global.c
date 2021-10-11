@@ -737,6 +737,23 @@ TypeInfo *parse_type(Context *context)
 	return parse_type_with_base(context, base);
 }
 
+TypeInfo *parse_failable_type(Context *context)
+{
+	ASSIGN_TYPE_ELSE(TypeInfo *info, parse_base_type(context), poisoned_type_info);
+	ASSIGN_TYPE_ELSE(info, parse_type_with_base(context, info), poisoned_type_info);
+	if (try_consume(context, TOKEN_BANG))
+	{
+		assert(!info->failable);
+		info->failable = true;
+		if (info->resolve_status == RESOLVE_DONE)
+		{
+			info->type = type_get_failable(info->type);
+		}
+		RANGE_EXTEND_PREV(info);
+	}
+	return info;
+}
+
 
 #pragma mark --- Decl parsing
 
@@ -753,7 +770,6 @@ Decl *parse_decl_after_type(Context *context, TypeInfo *type)
 		SEMA_TOKEN_ERROR(context->tok, "Expected '{'.");
 		return poisoned_decl;
 	}
-
 
 	EXPECT_IDENT_FOR_OR("variable name", poisoned_decl);
 
@@ -789,9 +805,8 @@ Decl *parse_decl(Context *context)
 
 	bool is_static = try_consume(context, TOKEN_STATIC);
 
-	ASSIGN_TYPE_ELSE(TypeInfo *type, parse_type(context), poisoned_decl);
+	ASSIGN_TYPE_ELSE(TypeInfo *type, parse_failable_type(context), poisoned_decl);
 
-	type->failable = try_consume(context, TOKEN_BANG);
 	ASSIGN_DECL_ELSE(Decl *decl, parse_decl_after_type(context, type), poisoned_decl);
 	if (type->failable && decl->var.unwrap)
 	{
@@ -1002,9 +1017,8 @@ bool parse_attributes(Context *context, Attr ***attributes_ref)
  */
 static inline Decl *parse_global_declaration(Context *context, Visibility visibility)
 {
-	ASSIGN_TYPE_ELSE(TypeInfo *type, parse_type(context), poisoned_decl);
+	ASSIGN_TYPE_ELSE(TypeInfo *type, parse_failable_type(context), poisoned_decl);
 
-	type->failable = try_consume(context, TOKEN_BANG);
 	Decl *decl = decl_new_var(context->tok.id, type, VARDECL_GLOBAL, visibility);
 
 	if (TOKEN_IS(TOKEN_CONST_IDENT))
@@ -1528,9 +1542,8 @@ static inline Decl *parse_define_type(Context *context, Visibility visibility)
 		decl->span.loc = start;
 		decl->typedef_decl.is_func = true;
 		decl->typedef_decl.is_distinct = distinct;
-		ASSIGN_TYPE_ELSE(TypeInfo *type_info, parse_type(context), poisoned_decl);
+		ASSIGN_TYPE_ELSE(TypeInfo *type_info, parse_failable_type(context), poisoned_decl);
 		decl->typedef_decl.function_signature.rtype = type_info;
-		type_info->failable = try_consume(context, TOKEN_BANG);
 		if (!parse_parameter_list(context, decl->visibility, &(decl->typedef_decl.function_signature), true))
 		{
 			return poisoned_decl;
@@ -1690,10 +1703,7 @@ parse_func_macro_header(Context *context, bool rtype_is_optional, TypeInfo **rty
 	}
 
 	// 2. Now we must have a type - either that is the return type or the method type.
-	ASSIGN_TYPE_ELSE(rtype, parse_type(context), false);
-
-	// 3. We possibly have a failable return at this point.
-	rtype->failable = try_consume(context, TOKEN_BANG);
+	ASSIGN_TYPE_ELSE(rtype, parse_failable_type(context), false);
 
 	// 4. We might have a type here, if so then we read it.
 	if (!TOKEN_IS(TOKEN_DOT) && context_next_is_type_and_not_ident(context))
@@ -2385,3 +2395,4 @@ Decl *parse_top_level_statement(Context *context)
 	decl->docs = docs;
 	return decl;
 }
+

@@ -245,12 +245,6 @@ typedef enum
 	DESIGNATOR_RANGE
 } DesignatorType;
 
-typedef enum
-{
-	FAILABLE_NO,
-	FAILABLE_YES,
-	FAILABLE_UNWRAPPED
-} ExprFailableStatus;
 
 
 typedef enum

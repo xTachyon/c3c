@@ -497,11 +497,11 @@ bool sema_erase_var(Context *context, Decl *decl)
 
 bool sema_erase_unwrapped(Context *context, Decl *decl)
 {
-	assert(decl->type->type_kind != TYPE_FAILABLE);
+	assert(IS_FAILABLE(decl));
 	Decl *rewrapped = decl_copy(decl);
 	rewrapped->var.kind = VARDECL_REWRAPPED;
 	rewrapped->var.alias = decl;
-	rewrapped->type = type_get_failable(decl->type);
+	rewrapped->type = decl->type;
 	rewrapped->resolve_status = RESOLVE_DONE;
 	return sema_append_local(context, rewrapped);
 }

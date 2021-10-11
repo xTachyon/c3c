@@ -48,7 +48,8 @@ void gencontext_emit_ct_compound_stmt(GenContext *context, Ast *ast)
 LLVMValueRef llvm_emit_local_decl(GenContext *c, Decl *decl)
 {
 	// 1. Get the declaration and the LLVM type.
-	LLVMTypeRef alloc_type = llvm_get_type(c, type_lowering(decl->type));
+	Type *var_type = type_lowering(type_no_fail(decl->type));
+	LLVMTypeRef alloc_type = llvm_get_type(c, var_type);
 
 	// 2. In the case we have a static variable,
 	//    then we essentially treat this as a global.
@@ -56,7 +57,7 @@ LLVMValueRef llvm_emit_local_decl(GenContext *c, Decl *decl)
 	{
 		void *builder = c->builder;
 		c->builder = NULL;
-		decl->backend_ref = LLVMAddGlobal(c->module, llvm_get_type(c, decl->type), "tempglobal");
+		decl->backend_ref = LLVMAddGlobal(c->module, alloc_type, "tempglobal");
 		if (IS_FAILABLE(decl))
 		{
 			scratch_buffer_clear();

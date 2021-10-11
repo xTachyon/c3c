@@ -439,9 +439,8 @@ static inline bool parse_foreach_var(Context *context, Ast *foreach)
 	// If we don't get foreach (foo ... or foreach (*foo ... then a type is expected.
 	if (!TOKEN_IS(TOKEN_IDENT) && !TOKEN_IS(TOKEN_AMP))
 	{
-		ASSIGN_TYPE_ELSE(type, parse_type(context), false);
+		ASSIGN_TYPE_ELSE(type, parse_failable_type(context), false);
 
-		failable = try_consume(context, TOKEN_BANG);
 		// Add the failable to the type for nicer error reporting.
 		RANGE_EXTEND_PREV(type);
 	}
@@ -459,7 +458,6 @@ static inline bool parse_foreach_var(Context *context, Ast *foreach)
 		SEMA_TOKEN_ERROR(context->tok, "Expected an identifier or type.");
 		return false;
 	}
-	if (failable) type->failable = true;
 	Decl *var = decl_new_var(context->prev_tok, type, VARDECL_LOCAL, VISIBLE_LOCAL);
 	foreach->foreach_stmt.variable = var;
 	return true;
@@ -586,17 +584,13 @@ static inline Ast *parse_decl_or_expr_stmt(Context *context)
 	// If so we need to unwrap this.
 	if (expr->expr_kind == EXPR_FAILABLE && expr->failable_expr->expr_kind == EXPR_TYPEINFO)
 	{
-		failable = true;
+		UNREACHABLE
 		expr_replace(expr, expr->failable_expr);
 	}
 	if (expr->expr_kind == EXPR_TYPEINFO)
 	{
 		ast->ast_kind = AST_DECLARE_STMT;
 		ASSIGN_DECL_ELSE(ast->declare_stmt, parse_decl_after_type(context, expr->type_expr), poisoned_ast);
-		if (failable)
-		{
-			ast->declare_stmt->type = type_get_failable(ast->declare_stmt->type);
-		}
 	}
 	else
 	{
