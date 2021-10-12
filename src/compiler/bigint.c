@@ -579,6 +579,310 @@ bool mul_u64_overflow(uint64_t op1, uint64_t op2, uint64_t *result)
 
 #endif
 
+#define HI32(_x) ((_x) >> 32)
+#define LO32(_x) ((_x) & 0xffffffff)
+#define ISNEG(_x) (((uint64_t)_x) >> 63)
+
+Int128 int128_from_str(const char *str)
+{
+	char c;
+	Int128 x = { 0, 0 };
+	while ((c = *(str++)) != 0)
+	{
+		x = int128_add64(int128_mult64(x, 10), c - '0');
+	}
+	return x;
+}
+
+Int128 int128_add(Int128 op1, Int128 op2)
+{
+	uint64_t low = op1.low + op2.low;
+	uint64_t high = op1.high + op2.high;
+	if (low < op1.low) high++;
+	return (Int128) { high, low };
+}
+
+Int128 int128_add64(Int128 op1, uint64_t op2)
+{
+	uint64_t low = op1.low + op2;
+	return (Int128) { low < op1.low ? op1.high + 1 : op1.high, low };
+}
+
+Int128 int128_sub(Int128 op1, Int128 op2)
+{
+	uint64_t low = op1.low - op2.low;
+	uint64_t high = op1.high - op2.high;
+
+	if (low > op1.low) high--;
+	return (Int128) { high, low };
+}
+
+Int128 int128_and(Int128 op1, Int128 op2)
+{
+	return (Int128) { op1.high & op2.high, op1.low & op2.low };
+}
+
+Int128 int128_or(Int128 op1, Int128 op2)
+{
+	return (Int128) { op1.high | op2.high, op1.low | op2.low };
+}
+
+Int128 int128_xor(Int128 op1, Int128 op2)
+{
+	return (Int128) { op1.high ^ op2.high, op1.low ^ op2.low };
+}
+
+Int128 int128_neg(Int128 op1)
+{
+	return (Int128) { ~op1.high, ~op1.low };
+}
+
+static Int128 int64_mult(uint64_t u, uint64_t v)
+{
+	uint64_t u1 = LO32(u);
+	uint64_t v1 = LO32(v);
+	uint64_t t = u1 * v1;
+	uint64_t w3 = LO32(t);
+	uint64_t k = HI32(t);
+
+	u >>= 32;
+	t = u * v1 + k;
+	k = LO32(t);
+	uint64_t w1 = HI32(t);
+
+	v >>= 32;
+	t = u1 * v + k;
+
+	return (Int128) { (u * v) + w1 + HI32(t), (t << 32) + w3 };
+}
+
+Int128 int128_mult(Int128 op1, Int128 op2)
+{
+	Int128 low_mult = int64_mult(op1.low, op2.low);
+	low_mult.high += op1.high * op2.low + op1.low * op2.high;
+	return low_mult;
+}
+
+Int128 int128_mult64(Int128 op1, uint64_t op2)
+{
+	Int128 low_mult = int64_mult(op1.low, op2);
+	low_mult.high += op1.high * op2;
+	return low_mult;
+}
+
+
+CmpRes int128_scomp64(Int128 op1, int64_t op2)
+{
+	// Check all zero
+	if (!op2 && !op1.high && !op1.low) return CMP_EQ;
+
+	bool lhs_sign = ISNEG(op1.high);
+	bool rhs_sign = ISNEG(op2);
+	if (lhs_sign != rhs_sign)
+	{
+		return lhs_sign ? CMP_LT : CMP_GT;
+	}
+
+	// Handle negative values
+	if (lhs_sign)
+	{
+		// If this isn't a clean 11111... in the top bits, it's less than.
+		if (op1.high != UINT64_MAX) return CMP_LT;
+		if (op1.low == op2) return CMP_EQ;
+		return ((int64_t)op1.low) > op2 ? CMP_GT : CMP_LT;
+	}
+
+	if (op1.high) return CMP_GT;
+	if (op1.low == op2) return CMP_EQ;
+	return op1.low > (uint64_t)op2 ? CMP_GT : CMP_LT;
+}
+
+CmpRes int128_ucomp64(Int128 op1, uint64_t op2)
+{
+	if (op1.high) return CMP_GT;
+	if (op1.low == op2) return CMP_EQ;
+	return op1.low > op2 ? CMP_GT : CMP_LT;
+}
+
+CmpRes int128_ucomp(Int128 op1, Int128 op2)
+{
+	if (op1.high > op2.high) return CMP_GT;
+	if (op1.high < op2.high) return CMP_LT;
+	if (op1.low == op2.low) return CMP_EQ;
+	return op1.low > op2.low ? CMP_GT : CMP_LT;
+}
+
+Int128 int128_shl64(Int128 op1, uint64_t amount)
+{
+	if (amount == 0) return op1;
+	if (amount > 127) return (Int128) { 0, 0 };
+	if (amount == 64) return (Int128) { op1.low, 0 };
+	if (amount > 64) return (Int128) { op1.low << (amount - 64), 0 };
+	return (Int128) { (op1.high <<= amount) | op1.low >> (64 - amount), op1.low << amount };
+}
+
+Int128 int128_shl(Int128 op1, Int128 op2)
+{
+	if (op2.high) return (Int128) { 0, 0 };
+	return int128_shl64(op1, op2.low);
+}
+
+Int128 int128_lshr64(Int128 op1, uint64_t amount)
+{
+	if (amount == 0) return op1;
+	if (amount > 127) return (Int128) { 0, 0 };
+	if (amount == 64) return (Int128) { 0, op1.high };
+	if (amount > 64) return (Int128) { 0, op1.high >> (amount - 64) };
+	op1.low >>= amount;
+	op1.low |= op1.high << (64 - amount);
+	op1.high >>= amount;
+	return op1;
+}
+
+Int128 int128_lshr(Int128 op1, Int128 op2)
+{
+	if (op2.high != 0) return (Int128) { 0, 0 };
+	return int128_lshr64(op1, op2.low);
+}
+
+Int128 int128_ashr64(Int128 op1, uint64_t amount)
+{
+	if (!ISNEG(op1.high)) return int128_lshr64(op1, amount);
+	if (amount > 127) return (Int128) { UINT64_MAX, UINT64_MAX };
+	if (amount == 64) return (Int128) { UINT64_MAX, op1.high };
+	if (amount > 64) return (Int128) { UINT64_MAX, ((int64_t)op1.high) >> (amount - 64) };
+	return (Int128) { ((int64_t)op1.high) >> amount, op1.low >> amount | op1.high << (64 - amount) };
+}
+
+Int128 int128_ashr(Int128 op1, Int128 op2)
+{
+	if (op2.high != 0) return ISNEG(op1.high) ? (Int128) { UINT64_MAX, UINT64_MAX } : (Int128) { 0, 0 };
+	return int128_ashr64(op1, op2.low);
+}
+
+CmpRes int128_scomp(Int128 op1, Int128 op2)
+{
+	bool lhs_sign = op1.high & ((uint64_t)INT64_MIN);
+	bool rhs_sign = op2.high & ((uint64_t)INT64_MIN);
+	if (lhs_sign != rhs_sign)
+	{
+		return lhs_sign ? CMP_LT : CMP_GT;
+	}
+	if (op1.high > op2.high) return CMP_GT;
+	if (op1.high < op2.high) return CMP_LT;
+	if (op1.low == op2.low) return CMP_EQ;
+	return op1.low > op2.low ? CMP_GT : CMP_LT;
+}
+
+uint32_t nlz64(uint64_t n)
+{
+	uint64_t neg_n = ~n;
+	uint32_t c = ((neg_n ^ (neg_n + 1)) & neg_n) >> 63;
+
+	neg_n = (n >> 32) + 0xffffffff;
+	neg_n = ((neg_n & 0x100000000) ^ 0x100000000) >> 27;
+	c += neg_n;
+	n <<= neg_n;
+
+	neg_n = (n >> 48) + 0xffff;
+	neg_n = ((neg_n & 0x10000) ^ 0x10000) >> 12;
+	c += neg_n;
+	n <<= neg_n;
+
+	neg_n = (n >> 56) + 0xff;
+	neg_n = ((neg_n & 0x100) ^ 0x100) >> 5;
+	c += neg_n;
+	n <<= neg_n;
+
+	neg_n = (n >> 60) + 0xf;
+	neg_n = ((neg_n & 0x10) ^ 0x10) >> 2;
+	c += neg_n;
+	n <<= neg_n;
+
+	neg_n = (n >> 62) + 3;
+	neg_n = ((neg_n & 4) ^ 4) >> 1;
+	c += neg_n;
+	n <<= neg_n;
+
+	c += (n >> 63) ^ 1;
+
+	return c;
+}
+
+uint32_t nlz128(Int128 op)
+{
+	return op.high ? nlz64(op.high) : nlz64(op.low) + 64;
+}
+
+
+void int128_udivrem(Int128 op1, Int128 op2, Int128 *div, Int128 *rem)
+{
+	*div = (Int128) { 0, 0 };
+	int32_t shift = nlz128(op2) - nlz128(op1);
+	if (shift < 0)
+	{
+		*rem = op1;
+		return;
+	}
+	op2 = int128_shl64(op2, shift);
+	do
+	{
+		*div = int128_shl64(*div, 1);
+		if (int128_ucomp(op1, op2) != CMP_LT)
+		{
+			op1 = int128_sub(op1, op2);
+			div->low |= 1;
+		}
+		op2 = int128_lshr64(op2, 1);
+
+	} while (shift-- != 0);
+	rem->high = op1.high;
+	rem->low = op1.low;
+}
+
+Int128 int128_udiv(Int128 op1, Int128 op2)
+{
+	Int128 div, rem;
+	int128_udivrem(op1, op2, &div, &rem);
+	return div;
+}
+
+Int128 int128_urem(Int128 op1, Int128 op2)
+{
+	Int128 div, rem;
+	int128_udivrem(op1, op2, &div, &rem);
+	return rem;
+}
+
+Int128 int128_srem(Int128 op1, Int128 op2)
+{
+	uint64_t topbit1 = op1.high & 0x8000000000000000;
+	uint64_t topbit2 = op2.high & 0x8000000000000000;
+	if (topbit1) op1 = int128_neg(op1);
+	if (topbit2) op2 = int128_neg(op2);
+	Int128 res = int128_urem(op1, op2);
+	if (topbit2 ^ topbit1)
+	{
+		return int128_neg(res);
+	}
+	return res;
+}
+
+Int128 int128_sdiv(Int128 op1, Int128 op2)
+{
+	uint64_t topbit1 = op1.high & 0x8000000000000000;
+	uint64_t topbit2 = op2.high & 0x8000000000000000;
+	if (topbit1) op1 = int128_neg(op1);
+	if (topbit2) op2 = int128_neg(op2);
+	Int128 res = int128_udiv(op1, op2);
+	if (topbit2 ^ topbit1)
+	{
+		return int128_neg(res);
+	}
+	return res;
+}
+
+
 void bigint_add(BigInt *dest, const BigInt *op1, const BigInt *op2)
 {
 	if (op1->digit_count == 0)

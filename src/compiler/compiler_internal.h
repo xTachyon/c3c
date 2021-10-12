@@ -79,6 +79,11 @@ typedef struct BigInt_
 	};
 } BigInt;
 
+typedef struct BigInt2_
+{
+	uint64_t high;
+	uint64_t low;
+} Int128;
 
 typedef enum
 {
@@ -1623,9 +1628,9 @@ static inline Ast *extend_ast_with_prev_token(Context *context, Ast *ast)
 
 typedef enum CmpRes_
 {
-	CMP_LT,
-	CMP_GT,
-	CMP_EQ,
+	CMP_LT = -1,
+	CMP_EQ = 0,
+	CMP_GT = 1,
 } CmpRes;
 
 void bigint_init_unsigned(BigInt *big_int, uint64_t value);
@@ -1671,6 +1676,26 @@ void bigint_incr(BigInt *x);
 size_t bigint_popcount_signed(const BigInt *bi, size_t bit_count);
 size_t bigint_popcount_unsigned(const BigInt *big_int);
 void type_setup(PlatformTarget *target);
+Int128 int128_add(Int128 op1, Int128 op2);
+Int128 int128_add64(Int128 op1, uint64_t op2);
+Int128 int128_sub(Int128 op1, Int128 op2);
+Int128 int128_and(Int128 op1, Int128 op2);
+Int128 int128_or(Int128 op1, Int128 op2);
+Int128 int128_xor(Int128 op1, Int128 op2);
+Int128 int128_neg(Int128 op1);
+Int128 int128_mult(Int128 op1, Int128 op2);
+Int128 int128_mult64(Int128 op1, uint64_t op2);
+Int128 int128_from_str(const char *str);
+CmpRes int128_ucomp(Int128 op1, Int128 op2);
+CmpRes int128_scomp(Int128 op1, Int128 op2);
+Int128 int128_shl64(Int128 op1, uint64_t amount);
+Int128 int128_shl(Int128 op1, Int128 op);
+Int128 int128_ashr64(Int128 op1, uint64_t amount);
+Int128 int128_ashr(Int128 op1, Int128 op);
+Int128 int128_lshr64(Int128 op1, uint64_t amount);
+Int128 int128_lshr(Int128 op1, Int128 op);
+Int128 int128_udiv(Int128 op1, Int128 op2);
+Int128 int128_sdiv(Int128 op1, Int128 op2);
 
 static inline bool type_may_negate(Type *type)
 {
