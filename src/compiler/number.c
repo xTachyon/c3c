@@ -7,14 +7,12 @@
 
 void expr_const_set_int(ExprConst *expr, uint64_t v, TypeKind kind)
 {
+	expr->i.high = 0;
 	if (type_kind_is_signed(kind))
 	{
-		bigint_init_signed(&expr->i, (int64_t)v);
+		if (v > (uint64_t)INT64_MAX) expr->i.high = UINT64_MAX;
 	}
-	else
-	{
-		bigint_init_unsigned(&expr->i, v);
-	}
+	expr->i.low = v;
 	expr->const_kind = CONST_INTEGER;
 	expr->int_type = kind;
 }
@@ -27,8 +25,7 @@ void expr_const_set_bool(ExprConst *expr, bool b)
 
 void expr_const_set_null(ExprConst *expr)
 {
-	expr->i.digit_count = 0;
-	expr->i.digit = 0;
+	expr->i = (Int128) { 0, 0 };
 	expr->const_kind = CONST_POINTER;
 }
 
@@ -53,9 +50,28 @@ static inline bool compare_bool(bool left, bool right, BinaryOp op)
 	}
 }
 
-static inline bool compare_ints(const BigInt *left, const BigInt *right, BinaryOp op)
+static inline bool compare_ints(Int128 left, Int128 right, BinaryOp op, TypeKind left_kind, TypeKind right_kind)
 {
-	CmpRes res = bigint_cmp(left, right);
+	CmpRes res;
+	if (type_kind_is_signed(left_kind))
+	{
+		if (!type_kind_is_signed(right_kind) && i128_ucomp(right, INT128_MAX) == CMP_GT)
+		{
+			res = CMP_LT;
+			goto DONE;
+		}
+		res = i128_scomp(left, right);
+	}
+	else
+	{
+		if (type_kind_is_signed(right_kind) && i128_is_neg(right))
+		{
+			res = CMP_GT;
+			goto DONE;
+		}
+		res = i128_ucomp(left, right);
+	}
+	DONE:
 	switch (op)
 	{
 		case BINARYOP_GE:
@@ -104,7 +120,7 @@ bool expr_const_compare(const ExprConst *left, const ExprConst *right, BinaryOp 
 		case CONST_BOOL:
 			return compare_bool(left->b, right->b, op);
 		case CONST_INTEGER:
-			return compare_ints(&left->i, &right->i, op);
+			return compare_ints(left->i, right->i, op, left->int_type, right->int_type);
 		case CONST_FLOAT:
 			return compare_fps(left->f, right->f, op);
 		case CONST_POINTER:
@@ -190,24 +206,11 @@ bool expr_const_will_overflow(const ExprConst *expr, TypeKind kind)
 {
 	switch (kind)
 	{
-		case TYPE_I8:
-			return !bigint_fits_in_bits(&expr->i, 8, true);
-		case TYPE_I16:
-			return !bigint_fits_in_bits(&expr->i, 16, true);
-		case TYPE_I32:
-			return !bigint_fits_in_bits(&expr->i, 32, true);
-		case TYPE_I64:
-			return !bigint_fits_in_bits(&expr->i, 64, true);
-		case TYPE_U8:
-			return expr->i.is_negative || !bigint_fits_in_bits(&expr->i, 8, false);
-		case TYPE_U16:
-			return expr->i.is_negative || !bigint_fits_in_bits(&expr->i, 16, false);
-		case TYPE_U32:
-			return expr->i.is_negative || !bigint_fits_in_bits(&expr->i, 32, false);
-		case TYPE_U64:
-			return expr->i.is_negative || !bigint_fits_in_bits(&expr->i, 64, false);
+		case ALL_INTS:
+			return !int_fits(expr->ixx, kind);
 		case TYPE_F16:
-			return !bigint_fits_in_bits(&expr->i, 17, false);
+			REMINDER("Check f16 narrowing");
+			FALLTHROUGH;
 		case TYPE_F32:
 		case TYPE_F64:
 		case TYPE_F128:
@@ -232,7 +235,7 @@ const char *expr_const_to_error_string(const ExprConst *expr)
 		case CONST_BOOL:
 			return expr->b ? "true" : "false";
 		case CONST_INTEGER:
-			return bigint_to_error_string(&expr->i, 10);
+			return i128_to_string(expr->i, 10, type_kind_is_signed(expr->int_type));
 		case CONST_FLOAT:
 #if LONG_DOUBLE
 			asprintf(&buff, "%Lg", expr->f);

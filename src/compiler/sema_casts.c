@@ -72,7 +72,7 @@ bool string_literal_to_subarray(Expr* left, Type *type)
 
 static void const_int_to_fp_cast(Expr *expr, Type *canonical, Type *type)
 {
-	Real f = bigint_as_float(&expr->const_expr.i);
+	Real f = int_to_real(expr->const_expr.ixx);
 	switch (canonical->type_kind)
 	{
 		case TYPE_F32:
@@ -127,7 +127,7 @@ bool integer_to_bool(Expr *expr, Type *type)
 {
 	if (insert_runtime_cast_unless_const(expr, CAST_INTBOOL, type)) return true;
 
-	expr_const_set_bool(&expr->const_expr, bigint_cmp_zero(&expr->const_expr.i) != CMP_EQ);
+	expr_const_set_bool(&expr->const_expr, !i128_is_zero(expr->const_expr.i));
 	expr_set_type(expr, type);
 	expr->const_expr.narrowable = false;
 	return true;
@@ -170,17 +170,8 @@ bool float_to_integer(Expr *expr, Type *canonical, Type *type)
 
 	assert(type_is_integer(canonical));
 	Real d = expr->const_expr.f;
-	BigInt temp;
-	if (is_signed)
-	{
-		bigint_init_signed(&temp, (int64_t)d);
-		bigint_truncate(&expr->const_expr.i, &temp, canonical->builtin.bitsize, true);
-	}
-	else
-	{
-		bigint_init_unsigned(&temp, (uint64_t)d);
-		bigint_truncate(&expr->const_expr.i, &temp, canonical->builtin.bitsize, false);
-	}
+	Int128 i = is_signed ? i128_from_float_signed(d) : i128_from_float_unsigned(d);
+	expr->const_expr.i = i128_extend(i, canonical->type_kind);
 	expr->const_expr.int_type = canonical->type_kind;
 	expr->const_expr.const_kind = CONST_INTEGER;
 	expr_set_type(expr, type);
@@ -200,10 +191,7 @@ static bool int_literal_to_int(Expr *expr, Type *canonical, Type *type)
 		SEMA_ERROR(expr, "This expression could not be resolved to a concrete type. Please add more type annotations.");
 		UNREACHABLE
 	}
-	bool is_signed = canonical->type_kind < TYPE_U8;
-	BigInt temp;
-	bigint_truncate(&temp, &expr->const_expr.i, canonical->builtin.bitsize, is_signed);
-	expr->const_expr.i = temp;
+	expr->const_expr.i = i128_extend(expr->const_expr.i, canonical->type_kind);
 	expr->const_expr.int_type = canonical->type_kind;
 	assert(expr->const_expr.const_kind == CONST_INTEGER);
 	expr_set_type(expr, type);
@@ -226,9 +214,7 @@ static bool int_conversion(Expr *expr, CastKind kind, Type *canonical, Type *typ
 {
 	if (insert_runtime_cast_unless_const(expr, kind, type)) return true;
 
-	BigInt temp;
-	bigint_truncate(&temp, &expr->const_expr.i, canonical->builtin.bitsize, kind == CAST_UISI || kind == CAST_SISI);
-	expr->const_expr.i = temp;
+	expr->const_expr.ixx = int_conv(expr->const_expr.ixx, canonical->type_kind);
 	expr->const_expr.int_type = canonical->type_kind;
 	expr->const_expr.const_kind = CONST_INTEGER;
 	expr_set_type(expr, type);
@@ -262,7 +248,7 @@ static bool int_literal_to_float(Expr *expr, Type *canonical, Type *type)
 static bool int_literal_to_bool(Expr *expr, Type *type)
 {
 	assert(expr->expr_kind == EXPR_CONST);
-	expr_const_set_bool(&expr->const_expr, bigint_cmp_zero(&expr->const_expr.i) != CMP_EQ);
+	expr_const_set_bool(&expr->const_expr, !i128_is_zero(expr->const_expr.i));
 	expr->const_expr.narrowable = false;
 	expr_set_type(expr, type);
 	return true;
@@ -276,7 +262,7 @@ static bool int_to_pointer(Expr *expr, Type *type)
 {
 	if (expr->expr_kind == EXPR_CONST)
 	{
-		if (bigint_cmp_zero(&expr->const_expr.i) == CMP_EQ)
+		if (i128_is_zero(expr->const_expr.i))
 		{
 			expr_const_set_null(&expr->const_expr);
 			expr_set_type(expr, type);
@@ -734,7 +720,8 @@ bool may_convert_int_const_implicit(Expr *expr, Type *to_type)
 	Type *to_type_flat = type_flatten(to_type);
 	if (expr_const_will_overflow(&expr->const_expr, to_type_flat->type_kind))
 	{
-		SEMA_ERROR(expr, "The value '%s' is out of range for %s, it can be truncated with an explicit cast.", bigint_to_error_string(&expr->const_expr.i, 10), type_quoted_error_string(to_type));
+		SEMA_ERROR(expr, "The value '%s' is out of range for %s, it can be truncated with an explicit cast.",
+		           i128_to_string(expr->const_expr.i, 10, type_is_signed(to_type_flat)), type_quoted_error_string(to_type));
 		return false;
 	}
 	return true;

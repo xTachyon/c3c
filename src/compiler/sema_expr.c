@@ -51,20 +51,7 @@ static Expr *expr_access_inline_member(Expr *parent, Decl *parent_decl)
 }
 
 static inline bool sema_expr_analyse_binary(Context *context, Expr *expr);
-static inline bool expr_const_int_valid(Expr *expr, Type *type)
-{
-	if (expr_const_int_overflowed(&expr->const_expr))
-	{
-		SEMA_ERROR(expr, "Cannot fit '%s' into type '%s'.", expr_const_to_error_string(&expr->const_expr), type_to_error_string(type));
-		return false;
-	}
-	if (bigint_cmp_zero(&expr->const_expr.i) == CMP_LT && type_kind_is_unsigned(expr->const_expr.int_type))
-	{
-		SEMA_ERROR(expr, "'%s' underflows type '%s'.", expr_const_to_error_string(&expr->const_expr), type_to_error_string(type));
-		return false;
-	}
-	return true;
-}
+
 
 static inline bool is_const(Expr *expr)
 {
@@ -1965,17 +1952,19 @@ static bool expr_check_index_in_range(Context *context, Type *type, Expr *index_
 {
 	assert(type == type->canonical);
 	if (index_expr->expr_kind != EXPR_CONST) return true;
-	if (!bigint_fits_in_bits(&index_expr->const_expr.i, 64, true))
+
+	Int index = index_expr->const_expr.ixx;
+	if (!int_fits(index, TYPE_I64))
 	{
-		SEMA_ERROR(index_expr, "Index does not fit into an 64-signed integer.");
+		SEMA_ERROR(index_expr, "The index cannot be stored in a 64-signed integer, which isn't supported.");
 		return false;
 	}
-	int64_t index = bigint_as_signed(&index_expr->const_expr.i);
-	if (from_end && index < 0)
+	if (from_end && int_is_neg(index))
 	{
 		SEMA_ERROR(index_expr, "Negative numbers are not allowed when indexing from the end.");
 		return false;
 	}
+	ArrayIndex idx = index.i.low;
 	switch (type->type_kind)
 	{
 		case TYPE_POINTER:
@@ -1988,22 +1977,22 @@ static bool expr_check_index_in_range(Context *context, Type *type, Expr *index_
 			bool is_vector = type->type_kind == TYPE_VECTOR;
 			if (from_end)
 			{
-				index = len - index;
+				idx = len - idx;
 			}
 			// Checking end can only be done for arrays.
-			if (end_index && index >= len)
+			if (end_index && idx >= len)
 			{
 				SEMA_ERROR(index_expr,
 						   is_vector ? "End index out of bounds, was %lld, exceeding vector width %lld."
 						   : "Array end index out of bounds, was %lld, exceeding array length %lld.",
-						   (long long)index, (long long)len);
+						   (long long)idx, (long long)len);
 				return false;
 			}
-			if (!end_index && index >= len)
+			if (!end_index && idx >= len)
 			{
 				SEMA_ERROR(index_expr,
 						   is_vector ? "Index out of bounds, was %lld, exceeding max vector width %lld."
-						   : "Array index out of bounds, was %lld, exceeding max array index %lld.", (long long)index, (long long)len - 1);
+						   : "Array index out of bounds, was %lld, exceeding max array index %lld.", (long long)idx, (long long)len - 1);
 				return false;
 			}
 			break;
@@ -2013,18 +2002,18 @@ static bool expr_check_index_in_range(Context *context, Type *type, Expr *index_
 			// If not from end, just check the negative values.
 			if (!from_end) break;
 			// From end we can only do sanity checks ^0 is invalid for non-end index. ^-1 and less is invalid for all.
-			if (index == 0 && !end_index)
+			if (idx == 0 && !end_index)
 			{
 				SEMA_ERROR(index_expr,
 				           "Array index out of bounds, index from end (%lld) must be greater than zero or it will exceed the max array index.",
-				           (long long) index);
+				           (long long) idx);
 				return false;
 			}
 			return true;
 		default:
 			UNREACHABLE
 	}
-	if (index < 0)
+	if (idx < 0)
 	{
 		SEMA_ERROR(index_expr, "Array index out of bounds, using a negative array index is only allowed with pointers.");
 		return false;
@@ -2071,12 +2060,20 @@ static inline bool sema_expr_analyse_subscript(Context *context, Expr *expr)
 			SEMA_ERROR(index, "To subscript a compile time list a compile time integer index is needed.");
 			return false;
 		}
-		if (!bigint_fits_in_bits(&index->const_expr.i, 64, true))
+		if (!int_fits(index->const_expr.ixx, TYPE_I64))
 		{
-			SEMA_ERROR(index, "Index does not fit into an 64-signed integer.");
+			SEMA_ERROR(index, "Index does not fit in a 64-signed integer.");
 			return false;
 		}
-		int64_t i = bigint_as_signed(&index->const_expr.i);
+		if (type_size(type_usize) < 8)
+		{
+			if (int_fits(index->const_expr.ixx, type_usize->canonical->type_kind))
+			{
+				SEMA_ERROR(index, "Index does not fit into an usize.");
+				return false;
+			}
+		}
+		int64_t i = int_to_u64(index->const_expr.ixx);
 		unsigned count = vec_size(current_expr->initializer_list);
 		if (expr->subscript_expr.from_back)
 		{
@@ -2171,19 +2168,15 @@ static inline bool sema_expr_analyse_slice(Context *context, Expr *expr)
 	{
 		if (type->type_kind == TYPE_ARRAY)
 		{
-			BigInt len;
-			bigint_init_unsigned(&len, type->array.len);
-			BigInt result;
+			Int128 len = { 0, type->array.len };
 			if (expr->slice_expr.start_from_back)
 			{
-				bigint_sub(&result, &len, &start->const_expr.i);
-				start->const_expr.i = result;
+				start->const_expr.i = i128_sub(len, start->const_expr.i);
 				expr->slice_expr.start_from_back = false;
 			}
 			if (expr->slice_expr.end_from_back)
 			{
-				bigint_sub(&result, &len, &end->const_expr.i);
-				end->const_expr.i = result;
+				end->const_expr.i = i128_sub(len, end->const_expr.i);
 				expr->slice_expr.end_from_back = false;
 			}
 		}
@@ -2744,12 +2737,12 @@ static int64_t sema_analyse_designator_index(Context *context, Expr *index)
 		SEMA_ERROR(index, "The index must be a constant value.");
 		return -1;
 	}
-	if (!bigint_fits_in_bits(&index->const_expr.i, 64, true))
+	if (!int_fits(index->const_expr.ixx, TYPE_I64))
 	{
 		SEMA_ERROR(index, "The value of the index does not fit in a long.");
 		return -1;
 	}
-	int64_t index_val = bigint_as_signed(&index->const_expr.i);
+	int64_t index_val = int_to_i64(index->const_expr.ixx);
 	if (index_val < 0)
 	{
 		SEMA_ERROR(index, "Negative index values is not allowed.");
@@ -3543,19 +3536,18 @@ bool sema_expr_analyse_assign_right_side(Context *context, Expr *expr, Type *lef
 		SEMA_ERROR(right, "%s cannot be converted to %s.", type_quoted_error_string(right->type), type_quoted_error_string(left_type));
 		return false;
 	}
-
+	Type *right_type = type_no_fail(right->type)->canonical;
 	// 2. Evaluate right hand side, making special concession for inferred arrays.
-	do
-	{
-		if (!left_type) break;
-		if (left_type->canonical->type_kind == TYPE_INFERRED_ARRAY && right->type->canonical->type_kind == TYPE_ARRAY)
-		{
-			if (left_type->canonical->array.base == right->type->canonical->array.base) break;
-		}
-		assert(right->type->canonical->type_kind != TYPE_INFERRED_ARRAY);
-		if (!cast_implicit(right, left_type)) return false;
-	} while (0);
 
+	if (!no_fail_left_type) goto DONE;
+
+	if (no_fail_left_type->canonical->type_kind == TYPE_INFERRED_ARRAY && right_type->type_kind == TYPE_ARRAY)
+	{
+		if (no_fail_left_type->canonical->array.base == right_type->array.base) goto DONE;
+	}
+	if (!cast_implicit_ignore_failable(right, no_fail_left_type)) return false;
+
+	DONE:
 	// 3. Set the result to the type on the right side.
 	if (expr) expr->type = right->type;
 
@@ -3787,7 +3779,7 @@ static bool sema_expr_analyse_common_assign(Context *context, Expr *expr, Expr *
 			switch (right->const_expr.const_kind)
 			{
 				case CONST_INTEGER:
-					if (bigint_cmp_zero(&right->const_expr.i) == CMP_EQ)
+					if (int_is_zero(right->const_expr.ixx))
 					{
 						SEMA_ERROR(right, "Division by zero not allowed.");
 						return false;
@@ -3809,7 +3801,7 @@ static bool sema_expr_analyse_common_assign(Context *context, Expr *expr, Expr *
 			switch (right->const_expr.const_kind)
 			{
 				case CONST_INTEGER:
-					if (bigint_cmp_zero(&right->const_expr.i) == CMP_EQ)
+					if (int_is_zero(right->const_expr.ixx))
 					{
 						SEMA_ERROR(right, "% by zero not allowed.");
 						return false;
@@ -4052,7 +4044,7 @@ static bool sema_expr_analyse_sub(Context *context, Expr *expr, Expr *left, Expr
 		switch (left_type->type_kind)
 		{
 			case ALL_INTS:
-				bigint_sub(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
+				expr->const_expr.ixx = int_sub(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case ALL_FLOATS:
 				expr->const_expr.f = left->const_expr.f - right->const_expr.f;
@@ -4141,7 +4133,7 @@ static bool sema_expr_analyse_add(Context *context, Expr *expr, Expr *left, Expr
 		switch (left->const_expr.const_kind)
 		{
 			case CONST_INTEGER:
-				bigint_add(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
+				expr->const_expr.ixx = int_add(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case CONST_FLOAT:
 				expr->const_expr.f = left->const_expr.f + right->const_expr.f;
@@ -4190,7 +4182,7 @@ static bool sema_expr_analyse_mult(Context *context, Expr *expr, Expr *left, Exp
 		switch (left->const_expr.const_kind)
 		{
 			case CONST_INTEGER:
-				bigint_mul(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
+				expr->const_expr.ixx = int_mul(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case CONST_FLOAT:
 				expr->const_expr.f = left->const_expr.f * right->const_expr.f;
@@ -4230,7 +4222,7 @@ static bool sema_expr_analyse_div(Context *context, Expr *expr, Expr *left, Expr
 		switch (right->const_expr.const_kind)
 		{
 			case CONST_INTEGER:
-				if (bigint_cmp_zero(&right->const_expr.i) == CMP_EQ)
+				if (int_is_zero(right->const_expr.ixx))
 				{
 					SEMA_ERROR(right, "This expression evaluates to zero and division by zero is not allowed.");
 					return false;
@@ -4250,7 +4242,7 @@ static bool sema_expr_analyse_div(Context *context, Expr *expr, Expr *left, Expr
 		switch (left->const_expr.const_kind)
 		{
 			case CONST_INTEGER:
-				bigint_div_floor(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
+				expr->const_expr.ixx = int_div(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case CONST_FLOAT:
 				expr->const_expr.f = left->const_expr.f / right->const_expr.f;
@@ -4286,7 +4278,7 @@ static bool sema_expr_analyse_mod(Context *context, Expr *expr, Expr *left, Expr
 	}
 
 	// 3. a % 0 is not valid, so detect it.
-	if (is_const(right) && bigint_cmp_zero(&right->const_expr.i) == CMP_EQ)
+	if (is_const(right) && int_is_zero(right->const_expr.ixx))
 	{
 		SEMA_ERROR(expr->binary_expr.right, "Cannot perform %% with a constant zero.");
 		return false;
@@ -4297,7 +4289,7 @@ static bool sema_expr_analyse_mod(Context *context, Expr *expr, Expr *left, Expr
 	{
 		expr_replace(expr, left);
 		// 4a. Remember this is remainder.
-		bigint_rem(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
+		expr->const_expr.ixx = int_rem(left->const_expr.ixx, right->const_expr.ixx);
 	}
 
 	expr_unify_binary(expr, left, right);
@@ -4337,13 +4329,13 @@ static bool sema_expr_analyse_bit(Context *context, Expr *expr, Expr *left, Expr
 		switch (expr->binary_expr.operator)
 		{
 			case BINARYOP_BIT_AND:
-				bigint_and(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
+				expr->const_expr.ixx = int_and(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case BINARYOP_BIT_XOR:
-				bigint_xor(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
+				expr->const_expr.ixx = int_xor(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case BINARYOP_BIT_OR:
-				bigint_or(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
+				expr->const_expr.ixx = int_or(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			default:
 				UNREACHABLE;
@@ -4384,16 +4376,14 @@ static bool sema_expr_analyse_shift(Context *context, Expr *expr, Expr *left, Ex
 	{
 		// 5a. Make sure the value does not exceed the bitsize of
 		//     the left hand side. We ignore this check for lhs being a constant.
-		BigInt bitsize;
-		bigint_init_unsigned(&bitsize, left->type->canonical->builtin.bitsize);
-		if (bigint_cmp(&right->const_expr.i, &bitsize) == CMP_GT)
+		if (int_ucomp(right->const_expr.ixx, left->type->canonical->builtin.bitsize, BINARYOP_GT))
 		{
 			SEMA_ERROR(right, "The shift exceeds bitsize of '%s'.", type_to_error_string(left->type));
 			return false;
 		}
 
 		// 5b. Make sure that the right hand side is positive.
-		if (bigint_cmp_zero(&right->const_expr.i) == CMP_LT)
+		if (int_is_neg(right->const_expr.ixx))
 		{
 			SEMA_ERROR(right, "A shift must be a positive number.");
 			return false;
@@ -4402,17 +4392,16 @@ static bool sema_expr_analyse_shift(Context *context, Expr *expr, Expr *left, Ex
 		// 6. Fold constant expressions.
 		if (is_const(left))
 		{
-			// 6a. For >> this is always an arithmetic shift.
+			expr_replace(expr, left);
+
 			if (expr->binary_expr.operator == BINARYOP_SHR)
 			{
-				expr_replace(expr, left);
-				bigint_shr(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i);
-				return true;
+				expr->const_expr.ixx = int_shr64(left->const_expr.ixx, right->const_expr.ixx.i.low);
 			}
-			expr_replace(expr, left);
-			int bit_count = left->type->canonical->builtin.bitsize;
-			bool is_signed = !type_kind_is_unsigned(left->const_expr.int_type);
-			bigint_shl_trunc(&expr->const_expr.i, &left->const_expr.i, &right->const_expr.i, bit_count, is_signed);
+			else
+			{
+				expr->const_expr.ixx = int_shl64(left->const_expr.ixx, right->const_expr.ixx.i.low);
+			}
 			return true;
 		}
 	}
@@ -4451,16 +4440,14 @@ static bool sema_expr_analyse_shift_assign(Context *context, Expr *expr, Expr *l
 	{
 		// 4a. Make sure the value does not exceed the bitsize of
 		//     the left hand side.
-		BigInt bitsize;
-		bigint_init_unsigned(&bitsize, left->type->canonical->builtin.bitsize);
-		if (bigint_cmp(&right->const_expr.i, &bitsize) == CMP_GT)
+		if (int_ucomp(right->const_expr.ixx, left->type->canonical->builtin.bitsize, BINARYOP_GT))
 		{
 			SEMA_ERROR(right, "The shift exceeds bitsize of '%s'.", type_to_error_string(left->type));
 			return false;
 		}
 
 		// 4b. Make sure that the right hand side is positive.
-		if (bigint_cmp_zero(&right->const_expr.i) == CMP_LT)
+		if (int_is_neg(right->const_expr.ixx))
 		{
 			SEMA_ERROR(right, "A shift must be a positive number.");
 			return false;
@@ -4824,29 +4811,25 @@ static bool sema_expr_analyse_addr(Context *context, Type *to, Expr *expr, Expr 
 
 static bool sema_expr_analyse_neg(Context *context, Expr *expr, Expr *inner)
 {
-	if (!type_may_negate(inner->type))
+	Type *nofail = type_no_fail(inner->type);
+	if (!type_may_negate(nofail))
 	{
 		SEMA_ERROR(expr, "Cannot negate %s.", type_to_error_string(inner->type));
 		return false;
 	}
+	Type *result_type = numeric_arithmetic_promotion(nofail);
 	expr_copy_properties(expr, inner);
-
+	if (!cast_implicit_ignore_failable(inner, result_type)) return false;
 	if (inner->expr_kind != EXPR_CONST)
 	{
-		expr_copy_types(expr, inner);
+		expr->type = inner->type;
 		return true;
 	}
 	expr_replace(expr, inner);
-
 	switch (expr->const_expr.const_kind)
 	{
 		case CONST_INTEGER:
-			bigint_negate(&expr->const_expr.i, &inner->const_expr.i);
-			if (expr_const_int_overflowed(&expr->const_expr))
-			{
-				SEMA_ERROR(expr, "%s does not fit in '%s'.", expr_const_to_error_string(&expr->const_expr), type_to_error_string(expr->type));
-				return false;
-			}
+			expr->const_expr.ixx = int_neg(inner->const_expr.ixx);
 			return true;
 		case CONST_FLOAT:
 			expr->const_expr.f = -expr->const_expr.f;
@@ -4866,7 +4849,7 @@ static bool sema_expr_analyse_bit_not(Context *context, Expr *expr, Expr *inner)
 {
 	expr_copy_properties(expr, inner);
 
-	Type *canonical = inner->type->canonical;
+	Type *canonical = type_no_fail(inner->type)->canonical;
 	if (!type_is_integer(canonical) && canonical != type_bool)
 	{
 		Type *vector_type = type_vector_type(canonical);
@@ -4874,32 +4857,21 @@ static bool sema_expr_analyse_bit_not(Context *context, Expr *expr, Expr *inner)
 		SEMA_ERROR(expr, "Cannot bit negate '%s'.", type_to_error_string(inner->type));
 		return false;
 	}
-
 VALID_VEC:
 	// The simple case, non-const.
 	if (inner->expr_kind != EXPR_CONST)
 	{
-		expr_copy_types(expr, inner);
+		expr->type = inner->type;
 		return true;
 	}
-
 	expr_replace(expr, inner);
 	if (expr->const_expr.const_kind == CONST_BOOL)
 	{
 		expr->const_expr.b = !expr->const_expr.b;
 		return true;
 	}
-	switch (expr->const_expr.int_type)
-	{
-		case ALL_SIGNED_INTS:
-			bigint_not(&expr->const_expr.i, &inner->const_expr.i, canonical->builtin.bitsize, true);
-			break;
-		case ALL_UNSIGNED_INTS:
-			bigint_not(&expr->const_expr.i, &inner->const_expr.i, canonical->builtin.bitsize, false);
-			break;
-		default:
-			UNREACHABLE
-	}
+	// TODO arithmetic promotion?
+	expr->const_expr.ixx = int_not(inner->const_expr.ixx);
 	return true;
 }
 
@@ -4954,13 +4926,15 @@ static inline bool sema_expr_analyse_ct_incdec(Context *context, Expr *expr, Exp
 	Expr *end_value = expr_copy(start_value);
 
 	// Make the change.
-	BigInt change;
-	bigint_init_signed(&change, expr->unary_expr.operator == UNARYOP_DEC ? -1 : 1);
-	bigint_add(&end_value->const_expr.i, &start_value->const_expr.i, &change);
-	if (!expr_const_int_valid(end_value, start_value->type)) return false;
-
+	if (expr->unary_expr.operator == UNARYOP_DEC)
+	{
+		end_value->const_expr.ixx = int_sub64(start_value->const_expr.ixx, 1);
+	}
+	else
+	{
+		end_value->const_expr.ixx = int_add64(start_value->const_expr.ixx, 1);
+	}
 	var->var.init_expr = end_value;
-
 	if (expr->expr_kind == EXPR_POST_UNARY)
 	{
 		expr_replace(expr, start_value);
@@ -5476,10 +5450,6 @@ static inline bool sema_expr_analyse_placeholder(Context *context, Expr *expr)
 		return false;
 	}
 	expr_replace(expr, value);
-	if (expr->expr_kind == EXPR_CONST && expr->const_expr.const_kind == CONST_INTEGER && value->const_expr.i.digit_count > 1)
-	{
-		bigint_init_bigint(&expr->const_expr.i, &value->const_expr.i);
-	}
 	return true;
 }
 
@@ -6381,7 +6351,7 @@ bool sema_analyse_assigned_expr(Context *context, Type *to, Expr *expr, bool may
 		if (!may_be_failable)
 		{
 			if (!to) to = expr->type;
-			SEMA_ERROR(expr, "%s cannot be converted to %s.", type_quoted_error_string(expr->type), type_quoted_error_string(to));
+			SEMA_ERROR(expr, "%s cannot be converted to %s.", type_quoted_error_string(type_no_fail(expr->type)), type_quoted_error_string(to));
 			return false;
 		}
 		if (to && to->type_kind != TYPE_FAILABLE)

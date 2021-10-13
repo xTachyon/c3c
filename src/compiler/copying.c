@@ -162,10 +162,6 @@ Expr *copy_expr(Expr *source_expr)
 			MACRO_COPY_EXPR(expr->guard_expr.inner);
 			return expr;
 		case EXPR_CONST:
-			if (expr->const_expr.const_kind == CONST_INTEGER && expr->const_expr.i.digit_count > 1)
-			{
-				bigint_init_bigint(&expr->const_expr.i, &source_expr->const_expr.i);
-			}
 			return expr;
 		case EXPR_BINARY:
 			MACRO_COPY_EXPR(expr->binary_expr.left);

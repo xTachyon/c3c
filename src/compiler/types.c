@@ -1361,6 +1361,33 @@ void type_setup(PlatformTarget *target)
 	type_init("anyerr", &t.anyerr, TYPE_ANYERR, target->width_pointer, target->align_pointer);
 }
 
+int type_kind_bitsize(TypeKind kind)
+{
+	switch (kind)
+	{
+		case TYPE_I8:
+		case TYPE_U8:
+			return 8;
+		case TYPE_I16:
+		case TYPE_U16:
+		case TYPE_F16:
+			return 16;
+		case TYPE_I32:
+		case TYPE_U32:
+		case TYPE_F32:
+			return 32;
+		case TYPE_I64:
+		case TYPE_U64:
+		case TYPE_F64:
+			return 64;
+		case TYPE_I128:
+		case TYPE_U128:
+		case TYPE_F128:
+			return 128;
+		default:
+			UNREACHABLE;
+	}
+}
 bool type_is_scalar(Type *type)
 {
 	RETRY:

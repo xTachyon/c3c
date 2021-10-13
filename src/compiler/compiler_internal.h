@@ -69,21 +69,21 @@ typedef struct Type_ Type;
 
 typedef unsigned AstId;
 
-typedef struct BigInt_
-{
-	unsigned digit_count;
-	bool is_negative;
-	union {
-		uint64_t digit;
-		uint64_t *digits;
-	};
-} BigInt;
-
-typedef struct BigInt2_
+typedef struct Int128_
 {
 	uint64_t high;
 	uint64_t low;
 } Int128;
+
+typedef struct
+{
+	Int128 i;
+	TypeKind type;
+} Int;
+
+#define UINT128_MAX ((Int128) { UINT64_MAX, UINT64_MAX })
+#define INT128_MAX ((Int128) { INT64_MAX, UINT64_MAX })
+#define INT128_MIN ((Int128) { (uint64_t)INT64_MIN, 0 })
 
 typedef enum
 {
@@ -141,9 +141,10 @@ typedef struct
 		};
 		struct
 		{
-			BigInt i;
+			Int128 i;
 			TypeKind int_type;
 		};
+		Int ixx;
 		bool b;
 		struct
 		{
@@ -1633,69 +1634,66 @@ typedef enum CmpRes_
 	CMP_GT = 1,
 } CmpRes;
 
-void bigint_init_unsigned(BigInt *big_int, uint64_t value);
-void bigint_init_signed(BigInt *big_int, int64_t value);
-void bigint_init_bigint(BigInt *dest, const BigInt *src);
-void bigint_init_data(BigInt *dest, const uint64_t *digits, unsigned int digit_count, bool is_negative);
-void bigint_negate(BigInt *dest, const BigInt *source);
-size_t bigint_clz(const BigInt *big_int, size_t bit_count);
-size_t bigint_ctz(const BigInt *big_int, size_t bit_count);
-bool bigint_fits_in_bits(const BigInt *big_int, size_t bit_count, bool is_signed);
-void bigint_write_twos_complement(const BigInt *big_int, uint8_t *buf, size_t bit_count, bool is_big_endian);
-void bigint_read_twos_complement(BigInt *dest, const uint8_t *buf, size_t bit_count, bool is_big_endian, bool is_signed);
-void bigint_add(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_add_wrap(BigInt *dest, const BigInt *op1, const BigInt *op2, size_t bit_count, bool is_signed);
-void bigint_sub(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_sub_wrap(BigInt *dest, const BigInt *op1, const BigInt *op2, size_t bit_count, bool is_signed);
-void bigint_mul(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_mul_wrap(BigInt *dest, const BigInt *op1, const BigInt *op2, size_t bit_count, bool is_signed);
-void bigint_rem(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_mod(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_shl(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_shl_int(BigInt *dest, const BigInt *op1, uint64_t shift);
-void bigint_shl_trunc(BigInt *dest, const BigInt *op1, const BigInt *op2, size_t bit_count, bool is_signed);
-void bigint_shr(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_div_floor(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_or(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_and(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_xor(BigInt *dest, const BigInt *op1, const BigInt *op2);
-void bigint_negate_wrap(BigInt *dest, const BigInt *op, size_t bit_count);
-void bigint_not(BigInt *dest, const BigInt *op, size_t bit_count, bool is_signed);
-bool bigint_eql(BigInt a, BigInt b);
-CmpRes bigint_cmp(const BigInt *op1, const BigInt *op2);
-CmpRes bigint_cmp_zero(const BigInt *op);
-uint32_t bigint_hash(BigInt x);
-const char *bigint_to_error_string(const BigInt *bigint, uint64_t base);
-void bigint_print(BigInt *bigint, uint64_t base);
-void bigint_fprint(FILE *file, BigInt *bigint, uint64_t base);
-uint64_t bigint_as_unsigned(const BigInt *bigint);
-int64_t bigint_as_signed(const BigInt *bigint);
-Real bigint_as_float(const BigInt *bigint);
-void bigint_truncate(BigInt *dst, const BigInt *op, size_t bit_count, bool is_signed);
-void bigint_incr(BigInt *x);
-size_t bigint_popcount_signed(const BigInt *bi, size_t bit_count);
-size_t bigint_popcount_unsigned(const BigInt *big_int);
 void type_setup(PlatformTarget *target);
-Int128 int128_add(Int128 op1, Int128 op2);
-Int128 int128_add64(Int128 op1, uint64_t op2);
-Int128 int128_sub(Int128 op1, Int128 op2);
-Int128 int128_and(Int128 op1, Int128 op2);
-Int128 int128_or(Int128 op1, Int128 op2);
-Int128 int128_xor(Int128 op1, Int128 op2);
-Int128 int128_neg(Int128 op1);
-Int128 int128_mult(Int128 op1, Int128 op2);
-Int128 int128_mult64(Int128 op1, uint64_t op2);
-Int128 int128_from_str(const char *str);
-CmpRes int128_ucomp(Int128 op1, Int128 op2);
-CmpRes int128_scomp(Int128 op1, Int128 op2);
-Int128 int128_shl64(Int128 op1, uint64_t amount);
-Int128 int128_shl(Int128 op1, Int128 op);
-Int128 int128_ashr64(Int128 op1, uint64_t amount);
-Int128 int128_ashr(Int128 op1, Int128 op);
-Int128 int128_lshr64(Int128 op1, uint64_t amount);
-Int128 int128_lshr(Int128 op1, Int128 op);
-Int128 int128_udiv(Int128 op1, Int128 op2);
-Int128 int128_sdiv(Int128 op1, Int128 op2);
+bool int_ucomp(Int op1, uint64_t op2, BinaryOp op);
+bool int_icomp(Int op1, int64_t op2, BinaryOp op);
+uint64_t int_to_u64(Int op);
+int64_t int_to_i64(Int op);
+bool int_is_zero(Int op);
+bool int_fits(Int op1, TypeKind kind);
+Int int_conv(Int op, TypeKind to_type);
+Int int_div(Int op1, Int op2);
+Int int_mul(Int op1, Int op2);
+Int int_sub(Int op1, Int op2);
+Int int_sub64(Int op1, uint64_t op2);
+Int int_add(Int op1, Int op2);
+Int int_add64(Int op1, uint64_t op2);
+Int int_rem(Int op1, Int op2);
+Int int_and(Int op1, Int op2);
+Int int_or(Int op1, Int op2);
+Int int_xor(Int op1, Int op2);
+Int int_neg(Int op);
+Int int_not(Int op);
+bool int_is_neg(Int op);
+Int int_shr64(Int op, uint64_t);
+Int int_shl64(Int op, uint64_t);
+Real int_to_real(Int op);
+char *int_to_str(Int i, int radix);
+Int128 i128_extend(Int128 op, TypeKind type);
+Int128 i128_add(Int128 op1, Int128 op2);
+Int128 i128_add64(Int128 op1, uint64_t op2);
+Int128 i128_add_swrap64(Int128 op1, int64_t op2, bool *wrapped);
+Int128 i128_add_uwrap64(Int128 op1, uint64_t op2, bool *wrapped);
+Int128 i128_sub(Int128 op1, Int128 op2);
+Int128 i128_sub64(Int128 op1, uint64_t op2);
+Int128 i128_and(Int128 op1, Int128 op2);
+Int128 i128_or(Int128 op1, Int128 op2);
+Int128 i128_xor(Int128 op1, Int128 op2);
+Int128 i128_neg(Int128 op1);
+Int128 i128_not(Int128 op1);
+Int128 i128_mult(Int128 op1, Int128 op2);
+Int128 i128_mult64(Int128 op1, uint64_t op2);
+Int128 i128_from_str(const char *str);
+char *i128_to_string(Int128 op, uint64_t base, bool is_signed);
+bool i128_is_neg(Int128 op);
+CmpRes i128_ucomp(Int128 op1, Int128 op2);
+CmpRes i128_scomp(Int128 op1, Int128 op2);
+CmpRes i128_comp(Int128 op1, Int128 op2, Type *type);
+Int128 i128_shl64(Int128 op1, uint64_t amount);
+Int128 i128_shl(Int128 op1, Int128 op);
+Int128 i128_ashr64(Int128 op1, uint64_t amount);
+Int128 i128_ashr(Int128 op1, Int128 op2);
+Int128 i128_lshr64(Int128 op1, uint64_t amount);
+Int128 i128_lshr(Int128 op1, Int128 op2);
+Int128 i128_udiv(Int128 op1, Int128 op2);
+Int128 i128_sdiv(Int128 op1, Int128 op2);
+Int128 i128_urem(Int128 op1, Int128 op2);
+Int128 i128_srem(Int128 op1, Int128 op2);
+Real i128_to_float(Int128 op);
+bool i128_is_zero(Int128 op);
+Int128 i128_from_float_signed(Real d);
+Int128 i128_from_float_unsigned(Real d);
+Int128 i128_from_signed(int64_t i);
 
 static inline bool type_may_negate(Type *type)
 {
@@ -1703,7 +1701,7 @@ static inline bool type_may_negate(Type *type)
 	switch (type->type_kind)
 	{
 		case ALL_FLOATS:
-		case ALL_SIGNED_INTS:
+		case ALL_INTS:
 		case TYPE_VECTOR:
 			return true;
 		case TYPE_DISTINCT:
@@ -2282,7 +2280,7 @@ static inline bool type_is_signed(Type *type) { return type->type_kind >= TYPE_I
 static inline bool type_is_unsigned(Type *type) { return type->type_kind >= TYPE_U8 && type->type_kind <= TYPE_U128; }
 static inline bool type_ok(Type *type) { return !type || type->type_kind != TYPE_POISONED; }
 static inline bool type_info_ok(TypeInfo *type_info) { return !type_info || type_info->kind != TYPE_INFO_POISON; }
-
+int type_kind_bitsize(TypeKind kind);
 bool type_is_scalar(Type *type);
 
 static inline bool type_is_numeric(Type *type)

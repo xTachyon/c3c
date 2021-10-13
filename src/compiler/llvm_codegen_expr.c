@@ -2910,15 +2910,25 @@ static void llvm_emit_const_expr(GenContext *c, BEValue *be_value, Expr *expr)
 				return;
 			}
 		case CONST_INTEGER:
-			if (type_is_unsigned(type))
+		{
+			LLVMValueRef value;
+			Int128 i = expr->const_expr.ixx.i;
+			switch (expr->const_expr.ixx.type)
 			{
-				llvm_value_set(be_value, llvm_const_int(c, type, bigint_as_unsigned(&expr->const_expr.i)), type);
+				case TYPE_I128:
+				case TYPE_U128:
+				{
+					uint64_t words[2] = { i.low, i.high };
+					value = LLVMConstIntOfArbitraryPrecision(llvm_get_type(c, type), 2, words);
+					break;
+				}
+				default:
+					value = llvm_const_int(c, type, i.low);
+					break;
 			}
-			else
-			{
-				llvm_value_set(be_value, llvm_const_int(c, type, bigint_as_signed(&expr->const_expr.i)), type);
-			}
+			llvm_value_set(be_value, value, type);
 			return;
+		}
 		case CONST_LIST:
 			llvm_emit_const_initializer_list_expr(c, be_value, expr);
 			return;

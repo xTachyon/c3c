@@ -289,9 +289,7 @@ static LLVMMetadataRef llvm_debug_enum_type(GenContext *c, Type *type, LLVMMetad
 	VECEACH(enums, i)
 	{
 		Decl *enum_constant = enums[i];
-		uint64_t val = is_unsigned
-				? bigint_as_unsigned(&enum_constant->enum_constant.expr->const_expr.i)
-				: (uint64_t)bigint_as_signed(&enum_constant->enum_constant.expr->const_expr.i);
+		uint64_t val = int_to_u64(enum_constant->enum_constant.expr->const_expr.ixx);
 		LLVMMetadataRef debug_info = LLVMDIBuilderCreateEnumerator(
 				c->debug.builder,
 				enum_constant->name, TOKLEN(enum_constant->name_token),

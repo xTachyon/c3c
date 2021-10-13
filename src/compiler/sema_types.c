@@ -30,28 +30,22 @@ bool sema_resolve_array_like_len(Context *context, TypeInfo *type_info, ArrayInd
 		SEMA_ERROR(len_expr, "Expected an integer size.");
 		return type_info_poison(type_info);
 	}
-	BigInt *big_len = &len_expr->const_expr.i;
+
 	bool is_vector = type_info->kind == TYPE_INFO_VECTOR;
-	switch (bigint_cmp_zero(big_len))
+	Int128 len = len_expr->const_expr.i;
+	if (type_is_signed(len_expr->type) && i128_is_neg(len))
 	{
-		case CMP_LT:
-			SEMA_ERROR(len_expr,
-					   is_vector ? "A vector may not have a negative width." :
-					   "An array may not have a negative size.");
-			return type_info_poison(type_info);
-		case CMP_EQ:
-			if (is_vector)
-			{
-				SEMA_ERROR(len_expr, "A vector may not have a zero width.");
-				return type_info_poison(type_info);
-			}
-			break;
-		case CMP_GT:
-			break;
+		SEMA_ERROR(len_expr,
+				   is_vector ? "A vector may not have a negative width." :
+				   "An array may not have a negative size.");
+		return type_info_poison(type_info);
 	}
-	BigInt max;
-	bigint_init_unsigned(&max, is_vector ? MAX_VECTOR_WIDTH : MAX_ARRAY_SIZE);
-	if (bigint_cmp(big_len, &max) == CMP_GT)
+	if (is_vector && i128_is_zero(len))
+	{
+		SEMA_ERROR(len_expr, "A vector may not have a zero width.");
+		return type_info_poison(type_info);
+	}
+	if (i128_scomp(len, (Int128){ 0, is_vector ? MAX_VECTOR_WIDTH : MAX_ARRAY_SIZE }) == CMP_GT)
 	{
 		if (is_vector)
 		{
@@ -63,7 +57,7 @@ bool sema_resolve_array_like_len(Context *context, TypeInfo *type_info, ArrayInd
 		}
 		return type_info_poison(type_info);
 	}
-	*len_ref = bigint_as_signed(big_len);
+	*len_ref = len.low;
 	return true;
 }
 

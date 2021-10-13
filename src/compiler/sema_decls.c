@@ -644,10 +644,7 @@ static inline bool sema_analyse_enum(Context *context, Decl *decl)
 	DEBUG_LOG("* Enum type resolved to %s.", type->name);
 	bool success = true;
 	unsigned enums = vec_size(decl->enums.values);
-	BigInt value;
-	BigInt add;
-	bigint_init_unsigned(&add, 1);
-	bigint_init_unsigned(&value, 0);
+	Int128 value = { 0, 0 };
 
 	for (unsigned i = 0; i < enums; i++)
 	{
@@ -671,7 +668,7 @@ static inline bool sema_analyse_enum(Context *context, Decl *decl)
 			expr_set_type(expr, type);
 			expr->resolve_status = RESOLVE_NOT_DONE;
 			REMINDER("Do range check");
-			bigint_init_bigint(&expr->const_expr.i, &value);
+			expr->const_expr.i = value;
 			expr->const_expr.int_type = canonical->type_kind;
 			expr->const_expr.const_kind = CONST_INTEGER;
 			expr->const_expr.narrowable = true;
@@ -686,7 +683,7 @@ static inline bool sema_analyse_enum(Context *context, Decl *decl)
 			enum_value->resolve_status = RESOLVE_DONE;
 			decl_poison(enum_value);
 			// Reset!
-			bigint_init_unsigned(&value, 0);
+			value = (Int128) { 0, 0 };
 			continue;
 		}
 
@@ -703,7 +700,7 @@ static inline bool sema_analyse_enum(Context *context, Decl *decl)
 		}
 
 		// Update the value
-		bigint_add(&value, &expr->const_expr.i, &add);
+		value = i128_add64(value, 1);
 		DEBUG_LOG("* Value: %s", expr_const_to_error_string(&expr->const_expr));
 		enum_value->resolve_status = RESOLVE_DONE;
 	}
@@ -906,19 +903,17 @@ AttributeType sema_analyse_attribute(Context *context, Attr *attr, AttributeDoma
 				return ATTRIBUTE_NONE;
 			}
 			{
-				BigInt comp;
-				bigint_init_unsigned(&comp, MAX_ALIGNMENT);
-				if (bigint_cmp(&attr->expr->const_expr.i, &comp) == CMP_GT)
+				if (int_ucomp(attr->expr->const_expr.ixx, MAX_ALIGNMENT, BINARYOP_GT))
 				{
 					SEMA_ERROR(attr->expr, "Alignment must be less or equal to %ull.", MAX_ALIGNMENT);
 					return ATTRIBUTE_NONE;
 				}
-				if (bigint_cmp_zero(&attr->expr->const_expr.i) != CMP_GT)
+				if (int_ucomp(attr->expr->const_expr.ixx, 0, BINARYOP_LE))
 				{
 					SEMA_ERROR(attr->expr, "Alignment must be greater than zero.");
 					return ATTRIBUTE_NONE;
 				}
-				uint64_t align = bigint_as_unsigned(&attr->expr->const_expr.i);
+				uint64_t align = int_to_u64(attr->expr->const_expr.ixx);
 				if (!is_power_of_two(align))
 				{
 					SEMA_ERROR(attr->expr, "Alignment must be a power of two.");

@@ -759,22 +759,21 @@ static Expr *parse_ct_call(Context *context, Expr *left)
 					SEMA_TOKEN_ERROR(context->tok, "Expected an integer index.");
 					return poisoned_expr;
 				}
-				BigInt *value = &int_expr->const_expr.i;
-				BigInt limit;
-				bigint_init_unsigned(&limit, MAX_ARRAYINDEX);
-				if (bigint_cmp(value, &limit) == CMP_GT)
+				Int128 value = int_expr->const_expr.i;
+				Int128 limit = { 0, MAX_ARRAY_SIZE };
+				if (i128_comp(value, limit, int_expr->type) == CMP_GT)
 				{
 					SEMA_ERROR(int_expr, "Array index out of range.");
 					return poisoned_expr;
 				}
-				if (bigint_cmp_zero(value) == CMP_LT)
+				if (type_is_signed(int_expr->type) && i128_is_neg(value))
 				{
 					SEMA_ERROR(int_expr, "Array index must be zero or greater.");
 					return poisoned_expr;
 				}
 				TRY_CONSUME_OR(TOKEN_RBRACKET, "Expected a ']' after the number.", poisoned_expr);
 				flat_element.array = true;
-				flat_element.index = (ArrayIndex)bigint_as_unsigned(value);
+				flat_element.index = value.low;
 			}
 			else if (try_consume(context, TOKEN_DOT))
 			{
@@ -941,23 +940,20 @@ static Expr *parse_integer(Context *context, Expr *left)
 	const char *string = TOKSTR(context->tok);
 	const char *end = string + TOKLEN(context->tok);
 
-	BigInt *i = &expr_int->const_expr.i;
-	bigint_init_unsigned(i, 0);
-	BigInt diff;
-	bigint_init_unsigned(&diff, 0);
-	BigInt ten;
-	bigint_init_unsigned(&ten, 10);
-	BigInt res;
+	Int128 i = { 0, 0 };
 	bool is_unsigned = false;
 	uint64_t type_bits = 0;
 	int hex_characters = 0;
 	int oct_characters = 0;
 	int binary_characters = 0;
+	bool wrapped = false;
+	uint64_t max;
 	switch (TOKLEN(context->tok) > 2 ? string[1] : '0')
 	{
 		case 'x':
 			string += 2;
 			is_unsigned = true;
+			max = UINT64_MAX >> 4;
 			while (string < end)
 			{
 				char c = *(string++);
@@ -973,26 +969,28 @@ static Expr *parse_integer(Context *context, Expr *left)
 					break;
 				}
 				if (c == '_') continue;
-				bigint_shl_int(&res, i, 4);
+				if (i.high > max) wrapped = true;
+				i = i128_shl64(i, 4);
+
 				if (c < 'A')
 				{
-					bigint_init_unsigned(&diff, c - '0');
+					i = i128_add64(i, c - '0');
 				}
 				else if (c < 'a')
 				{
-					bigint_init_unsigned(&diff, c - 'A' + 10);
+					i = i128_add64(i, c - 'A' + 10);
 				}
 				else
 				{
-					bigint_init_unsigned(&diff, c - 'a' + 10);
+					i = i128_add64(i, c - 'a' + 10);
 				}
 				hex_characters++;
-				bigint_add(i, &res, &diff);
 			}
 			break;
 		case 'o':
 			string += 2;
 			is_unsigned = true;
+			max = UINT64_MAX >> 3;
 			while (string < end)
 			{
 				char c = *(string++);
@@ -1008,22 +1006,23 @@ static Expr *parse_integer(Context *context, Expr *left)
 					break;
 				}
 				if (c == '_') continue;
-				bigint_shl_int(&res, i, 4);
-				bigint_init_unsigned(&diff, c - '0');
-				bigint_add(i, &res, &diff);
+				if (i.high > max) wrapped = true;
+				i = i128_shl64(i, 3);
+				i = i128_add64(i, c - '0');
 				oct_characters++;
 			}
 			break;
 		case 'b':
 			string += 2;
+			max = UINT64_MAX >> 1;
 			while (string < end)
 			{
 				char c = *(string++);
 				if (c == '_') continue;
 				binary_characters++;
-				bigint_shl_int(&res, i, 1);
-				bigint_init_unsigned(&diff, c - '0');
-				bigint_add(i, &res, &diff);
+				if (i.high > max) wrapped = true;
+				i = i128_shl64(i, 1);
+				i = i128_add64(i, c - '0');
 			}
 			break;
 		default:
@@ -1043,34 +1042,70 @@ static Expr *parse_integer(Context *context, Expr *left)
 					break;
 				}
 				if (c == '_') continue;
-				bigint_mul(&res, i, &ten);
-				bigint_init_unsigned(&diff, c - '0');
-				bigint_add(i, &res, &diff);
+				uint64_t old_top = i.high;
+				i = i128_mult64(i, 10);
+				i = i128_add64(i, c - '0');
+				if (!wrapped && old_top > i.high) wrapped = true;
 			}
 			break;
 	}
+	if (wrapped)
+	{
+		SEMA_TOKEN_ERROR(context->tok, "Integer size exceeded 128 bits, max 128 bits are supported.");
+		return poisoned_expr;
+	}
 	expr_int->const_expr.const_kind = CONST_INTEGER;
 	Type *type = is_unsigned ? type_cuint() : type_cint();
-	if (!type_bits && hex_characters)
+	expr_int->const_expr.narrowable = !type_bits;
+	if (type_bits)
 	{
-		type_bits = 8 * ((hex_characters + 1) / 2);
-		if (!is_power_of_two(type_bits)) type_bits = next_highest_power_of_2(type_bits);
+		if (!is_power_of_two(type_bits) || type_bits > 128)
+		{
+			SEMA_TOKEN_ERROR(context->tok, "Integer width should be 8, 16, 32, 64 or 128.");
+			return poisoned_expr;
+		}
 	}
-	if (type_bits && type_bits > 128)
+	else
 	{
-		SEMA_TOKEN_ERROR(context->tok, "Integer width exceeded 128 bits");
-		return poisoned_expr;
+		if (hex_characters)
+		{
+			type_bits = 4 * hex_characters;
+			if (type_bits > 128)
+			{
+				SEMA_TOKEN_ERROR(context->tok, "%d hex digits indicates a bit width over 128, which is not supported.", hex_characters);
+				return poisoned_expr;
+			}
+		}
+		if (oct_characters)
+		{
+			type_bits = 3 * oct_characters;
+			if (type_bits > 128)
+			{
+				SEMA_TOKEN_ERROR(context->tok, "%d octal digits indicates a bit width over 128, which is not supported.", oct_characters);
+				return poisoned_expr;
+			}
+		}
+		if (binary_characters)
+		{
+			type_bits = binary_characters;
+			if (type_bits > 128)
+			{
+				SEMA_TOKEN_ERROR(context->tok, "%d binary digits indicates a bit width over 128, which is not supported.", binary_characters);
+				return poisoned_expr;
+			}
+		}
+		if (type_bits && !is_power_of_two(type_bits)) type_bits = next_highest_power_of_2(type_bits);
 	}
-	if (type_bits && !is_power_of_two(type_bits))
+	if (!type_bits)
 	{
-		SEMA_TOKEN_ERROR(context->tok, "Integer width should be 8, 16, 32, 64 or 128.");
-		return poisoned_expr;
+		type_bits = type_size(type) * 8;
 	}
-	if (type_bits > 32)
+	if (type_bits)
 	{
-		assert(true);
+		type = is_unsigned ? type_int_unsigned_by_bitsize(type_bits) : type_int_signed_by_bitsize(type_bits);
 	}
-	if (!bigint_fits_in_bits(i, type_bits ? type_bits : type->builtin.bitsize, !is_unsigned))
+	expr_int->const_expr.ixx = (Int) { i, type->type_kind };
+	if (!int_fits(expr_int->const_expr.ixx, type->type_kind))
 	{
 		int radix = 10;
 		if (hex_characters) radix = 16;
@@ -1079,22 +1114,17 @@ static Expr *parse_integer(Context *context, Expr *left)
 		if (type_bits)
 		{
 			SEMA_TOKEN_ERROR(context->tok, "'%s' does not fit in a '%c%d' literal.",
-			                 bigint_to_error_string(i, radix), is_unsigned ? 'u' : 'i', type_bits);
+							 i128_to_string(i, radix, true), is_unsigned ? 'u' : 'i', type_bits);
 		}
 		else
 		{
 			SEMA_TOKEN_ERROR(context->tok, "'%s' does not fit in an %s literal.",
-							 bigint_to_error_string(i, radix), is_unsigned ? "unsigned int" : "int");
+			                 i128_to_string(i, radix, true), is_unsigned ? "unsigned int" : "int");
 		}
 		return poisoned_expr;
 	}
-	if (type_bits)
-	{
-		type = is_unsigned ? type_int_unsigned_by_bitsize(type_bits) : type_int_signed_by_bitsize(type_bits);
-	}
 	expr_int->const_expr.int_type = type->type_kind;
 	expr_int->type = type;
-	expr_int->const_expr.narrowable = !type_bits;
 	advance(context);
 	return expr_int;
 }
