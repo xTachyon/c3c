@@ -69,6 +69,13 @@ char *int_to_str(Int i, int radix)
 {
 	return i128_to_string(i.i, radix, type_kind_is_signed(i.type));
 }
+
+Int int_from_real(Real d, TypeKind type)
+{
+	return (Int) { type_kind_is_unsigned(type) ? i128_from_float_unsigned(d) : i128_from_float_signed(d),
+				   type };
+}
+
 Int128 i128_from_str(const char *str)
 {
 	char c;
@@ -511,6 +518,23 @@ static CmpRes int_ucompare(Int op1, uint64_t op2)
 	if (op1.i.high || op1.i.low > op2) return CMP_GT;
 	if (op1.i.low < op2) return CMP_LT;
 	return CMP_EQ;
+}
+
+static CmpRes int_compare(Int op1, Int op2)
+{
+	if (type_kind_is_signed(op1.type))
+	{
+		if (type_kind_is_signed(op2.type)) return i128_scomp(op1.i, op2.i);
+		if (int_is_neg(op1)) return CMP_LT;
+		return i128_ucomp(op1.i, op2.i);
+	}
+	if (int_is_neg(op2)) return CMP_GT;
+	return i128_ucomp(op1.i, op2.i);
+}
+
+bool int_comp(Int op1, Int op2, BinaryOp op)
+{
+	return binary_op_matches_res(op, int_compare(op1, op2));
 }
 
 bool int_icomp(Int op1, int64_t op2, BinaryOp op)

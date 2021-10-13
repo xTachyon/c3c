@@ -759,21 +759,20 @@ static Expr *parse_ct_call(Context *context, Expr *left)
 					SEMA_TOKEN_ERROR(context->tok, "Expected an integer index.");
 					return poisoned_expr;
 				}
-				Int128 value = int_expr->const_expr.i;
-				Int128 limit = { 0, MAX_ARRAY_SIZE };
-				if (i128_comp(value, limit, int_expr->type) == CMP_GT)
+				Int value = int_expr->const_expr.ixx;
+				if (!int_fits(value, TYPE_I64))
 				{
 					SEMA_ERROR(int_expr, "Array index out of range.");
 					return poisoned_expr;
 				}
-				if (type_is_signed(int_expr->type) && i128_is_neg(value))
+				if (int_is_neg(value))
 				{
 					SEMA_ERROR(int_expr, "Array index must be zero or greater.");
 					return poisoned_expr;
 				}
 				TRY_CONSUME_OR(TOKEN_RBRACKET, "Expected a ']' after the number.", poisoned_expr);
 				flat_element.array = true;
-				flat_element.index = value.low;
+				flat_element.index = value.i.low;
 			}
 			else if (try_consume(context, TOKEN_DOT))
 			{

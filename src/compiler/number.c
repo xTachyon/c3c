@@ -25,7 +25,7 @@ void expr_const_set_bool(ExprConst *expr, bool b)
 
 void expr_const_set_null(ExprConst *expr)
 {
-	expr->i = (Int128) { 0, 0 };
+	expr->ixx = (Int) { .i = (Int128) { 0, 0 }, .type = type_iptr->canonical->type_kind };
 	expr->const_kind = CONST_POINTER;
 }
 
@@ -49,48 +49,6 @@ static inline bool compare_bool(bool left, bool right, BinaryOp op)
 			UNREACHABLE
 	}
 }
-
-static inline bool compare_ints(Int128 left, Int128 right, BinaryOp op, TypeKind left_kind, TypeKind right_kind)
-{
-	CmpRes res;
-	if (type_kind_is_signed(left_kind))
-	{
-		if (!type_kind_is_signed(right_kind) && i128_ucomp(right, INT128_MAX) == CMP_GT)
-		{
-			res = CMP_LT;
-			goto DONE;
-		}
-		res = i128_scomp(left, right);
-	}
-	else
-	{
-		if (type_kind_is_signed(right_kind) && i128_is_neg(right))
-		{
-			res = CMP_GT;
-			goto DONE;
-		}
-		res = i128_ucomp(left, right);
-	}
-	DONE:
-	switch (op)
-	{
-		case BINARYOP_GE:
-			return res != CMP_LT;
-		case BINARYOP_LE:
-			return res != CMP_GT;
-		case BINARYOP_NE:
-			return res != CMP_EQ;
-		case BINARYOP_GT:
-			return res == CMP_GT;
-		case BINARYOP_LT:
-			return res == CMP_LT;
-		case BINARYOP_EQ:
-			return res == CMP_EQ;
-		default:
-			UNREACHABLE
-	}
-}
-
 static inline bool compare_fps(Real left, Real right, BinaryOp op)
 {
 	switch (op)
@@ -120,7 +78,7 @@ bool expr_const_compare(const ExprConst *left, const ExprConst *right, BinaryOp 
 		case CONST_BOOL:
 			return compare_bool(left->b, right->b, op);
 		case CONST_INTEGER:
-			return compare_ints(left->i, right->i, op, left->int_type, right->int_type);
+			return int_comp(left->ixx, right->ixx, op);
 		case CONST_FLOAT:
 			return compare_fps(left->f, right->f, op);
 		case CONST_POINTER:
@@ -235,7 +193,7 @@ const char *expr_const_to_error_string(const ExprConst *expr)
 		case CONST_BOOL:
 			return expr->b ? "true" : "false";
 		case CONST_INTEGER:
-			return i128_to_string(expr->i, 10, type_kind_is_signed(expr->int_type));
+			return int_to_str(expr->ixx, 10);
 		case CONST_FLOAT:
 #if LONG_DOUBLE
 			asprintf(&buff, "%Lg", expr->f);

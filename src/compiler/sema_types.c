@@ -32,20 +32,20 @@ bool sema_resolve_array_like_len(Context *context, TypeInfo *type_info, ArrayInd
 	}
 
 	bool is_vector = type_info->kind == TYPE_INFO_VECTOR;
-	Int128 len = len_expr->const_expr.i;
-	if (type_is_signed(len_expr->type) && i128_is_neg(len))
+	Int len = len_expr->const_expr.ixx;
+	if (int_is_neg(len))
 	{
 		SEMA_ERROR(len_expr,
 				   is_vector ? "A vector may not have a negative width." :
 				   "An array may not have a negative size.");
 		return type_info_poison(type_info);
 	}
-	if (is_vector && i128_is_zero(len))
+	if (is_vector && int_is_zero(len))
 	{
 		SEMA_ERROR(len_expr, "A vector may not have a zero width.");
 		return type_info_poison(type_info);
 	}
-	if (i128_scomp(len, (Int128){ 0, is_vector ? MAX_VECTOR_WIDTH : MAX_ARRAY_SIZE }) == CMP_GT)
+	if (int_icomp(len, is_vector ? MAX_VECTOR_WIDTH : MAX_ARRAY_SIZE, BINARYOP_GT))
 	{
 		if (is_vector)
 		{
@@ -57,7 +57,7 @@ bool sema_resolve_array_like_len(Context *context, TypeInfo *type_info, ArrayInd
 		}
 		return type_info_poison(type_info);
 	}
-	*len_ref = len.low;
+	*len_ref = len.i.low;
 	return true;
 }
 

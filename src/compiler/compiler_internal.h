@@ -1637,6 +1637,7 @@ typedef enum CmpRes_
 void type_setup(PlatformTarget *target);
 bool int_ucomp(Int op1, uint64_t op2, BinaryOp op);
 bool int_icomp(Int op1, int64_t op2, BinaryOp op);
+bool int_comp(Int op1, Int op2, BinaryOp op);
 uint64_t int_to_u64(Int op);
 int64_t int_to_i64(Int op);
 bool int_is_zero(Int op);
@@ -1658,6 +1659,7 @@ bool int_is_neg(Int op);
 Int int_shr64(Int op, uint64_t);
 Int int_shl64(Int op, uint64_t);
 Real int_to_real(Int op);
+Int int_from_real(Real d, TypeKind type);
 char *int_to_str(Int i, int radix);
 Int128 i128_extend(Int128 op, TypeKind type);
 Int128 i128_add(Int128 op1, Int128 op2);

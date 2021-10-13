@@ -2171,12 +2171,12 @@ static inline bool sema_expr_analyse_slice(Context *context, Expr *expr)
 			Int128 len = { 0, type->array.len };
 			if (expr->slice_expr.start_from_back)
 			{
-				start->const_expr.i = i128_sub(len, start->const_expr.i);
+				start->const_expr.ixx.i = i128_sub(len, start->const_expr.ixx.i);
 				expr->slice_expr.start_from_back = false;
 			}
 			if (expr->slice_expr.end_from_back)
 			{
-				end->const_expr.i = i128_sub(len, end->const_expr.i);
+				end->const_expr.ixx.i = i128_sub(len, end->const_expr.ixx.i);
 				expr->slice_expr.end_from_back = false;
 			}
 		}

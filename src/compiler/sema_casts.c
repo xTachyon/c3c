@@ -127,7 +127,7 @@ bool integer_to_bool(Expr *expr, Type *type)
 {
 	if (insert_runtime_cast_unless_const(expr, CAST_INTBOOL, type)) return true;
 
-	expr_const_set_bool(&expr->const_expr, !i128_is_zero(expr->const_expr.i));
+	expr_const_set_bool(&expr->const_expr, !int_is_zero(expr->const_expr.ixx));
 	expr_set_type(expr, type);
 	expr->const_expr.narrowable = false;
 	return true;
@@ -170,8 +170,7 @@ bool float_to_integer(Expr *expr, Type *canonical, Type *type)
 
 	assert(type_is_integer(canonical));
 	Real d = expr->const_expr.f;
-	Int128 i = is_signed ? i128_from_float_signed(d) : i128_from_float_unsigned(d);
-	expr->const_expr.i = i128_extend(i, canonical->type_kind);
+	expr->const_expr.ixx = int_from_real(d, canonical->type_kind);
 	expr->const_expr.int_type = canonical->type_kind;
 	expr->const_expr.const_kind = CONST_INTEGER;
 	expr_set_type(expr, type);
@@ -191,7 +190,7 @@ static bool int_literal_to_int(Expr *expr, Type *canonical, Type *type)
 		SEMA_ERROR(expr, "This expression could not be resolved to a concrete type. Please add more type annotations.");
 		UNREACHABLE
 	}
-	expr->const_expr.i = i128_extend(expr->const_expr.i, canonical->type_kind);
+	expr->const_expr.ixx = int_conv(expr->const_expr.ixx, canonical->type_kind);
 	expr->const_expr.int_type = canonical->type_kind;
 	assert(expr->const_expr.const_kind == CONST_INTEGER);
 	expr_set_type(expr, type);
@@ -262,7 +261,7 @@ static bool int_to_pointer(Expr *expr, Type *type)
 {
 	if (expr->expr_kind == EXPR_CONST)
 	{
-		if (i128_is_zero(expr->const_expr.i))
+		if (int_is_zero(expr->const_expr.ixx))
 		{
 			expr_const_set_null(&expr->const_expr);
 			expr_set_type(expr, type);
