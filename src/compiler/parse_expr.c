@@ -1122,7 +1122,6 @@ static Expr *parse_integer(Context *context, Expr *left)
 		}
 		return poisoned_expr;
 	}
-	expr_int->const_expr.int_type = type->type_kind;
 	expr_int->type = type;
 	advance(context);
 	return expr_int;
@@ -1270,10 +1269,9 @@ static Expr *parse_double(Context *context, Expr *left)
 {
 	assert(!left && "Had left hand side");
 	Expr *number = EXPR_NEW_TOKEN(EXPR_CONST, context->tok);
-	number->const_expr.f = TOKREAL(context->tok.id);
-	expr_set_type(number, type_double);
+	number->const_expr.fxx = (Float) { TOKREAL(context->tok.id), TYPE_F64 };
+	number->type = type_double;
 	REMINDER("Allow float with f");
-	number->const_expr.float_type = TYPE_F64;
 	number->const_expr.const_kind = CONST_FLOAT;
 	number->const_expr.narrowable = true;
 	advance(context);

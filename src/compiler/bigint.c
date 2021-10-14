@@ -512,6 +512,7 @@ bool binary_op_matches_res(BinaryOp op, CmpRes res)
 	}
 }
 
+
 static CmpRes int_ucompare(Int op1, uint64_t op2)
 {
 	if (type_kind_is_signed(op1.type) && i128_is_neg(op1.i)) return CMP_LT;
@@ -783,3 +784,32 @@ bool int_is_neg(Int op)
 	return i128_is_neg(op.i);
 }
 
+Float float_add(Float op1, Float op2)
+{
+	assert(op1.type = op2.type);
+	return (Float) { op1.f + op2.f, op1.type };
+}
+
+Float float_sub(Float op1, Float op2)
+{
+	assert(op1.type = op2.type);
+	return (Float) { op1.f - op2.f, op1.type };
+}
+
+Float float_mul(Float op1, Float op2)
+{
+	assert(op1.type = op2.type);
+	return (Float) { op1.f * op2.f, op1.type };
+}
+
+Float float_div(Float op1, Float op2)
+{
+	assert(op1.type = op2.type);
+	return (Float) { op1.f / op2.f, op1.type };
+}
+
+Float float_neg(Float op)
+{
+	op.f = -op.f;
+	return op;
+}

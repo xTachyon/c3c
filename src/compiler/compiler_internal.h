@@ -81,6 +81,12 @@ typedef struct
 	TypeKind type;
 } Int;
 
+typedef struct
+{
+	Real f;
+	TypeKind type;
+} Float;
+
 #define UINT128_MAX ((Int128) { UINT64_MAX, UINT64_MAX })
 #define INT128_MAX ((Int128) { INT64_MAX, UINT64_MAX })
 #define INT128_MIN ((Int128) { (uint64_t)INT64_MIN, 0 })
@@ -134,16 +140,7 @@ typedef struct
 	bool narrowable : 1;
 	union
 	{
-		struct
-		{
-			Real f;
-			TypeKind float_type;
-		};
-		struct
-		{
-			Int128 i;
-			TypeKind int_type;
-		};
+		Float fxx;
 		Int ixx;
 		bool b;
 		struct
@@ -1635,6 +1632,11 @@ typedef enum CmpRes_
 } CmpRes;
 
 void type_setup(PlatformTarget *target);
+Float float_add(Float op1, Float op2);
+Float float_sub(Float op1, Float op2);
+Float float_mul(Float op1, Float op2);
+Float float_div(Float op1, Float op2);
+Float float_neg(Float op);
 bool int_ucomp(Int op1, uint64_t op2, BinaryOp op);
 bool int_icomp(Int op1, int64_t op2, BinaryOp op);
 bool int_comp(Int op1, Int op2, BinaryOp op);
@@ -1821,7 +1823,6 @@ void expr_const_set_float(ExprConst *expr, Real d, TypeKind kind);
 void expr_const_set_bool(ExprConst *expr, bool b);
 void expr_const_set_null(ExprConst *expr);
 
-bool expr_const_int_overflowed(const ExprConst *expr);
 bool expr_const_compare(const ExprConst *left, const ExprConst *right, BinaryOp op);
 bool expr_const_will_overflow(const ExprConst *expr, TypeKind kind);
 ByteSize expr_const_list_size(const ConstInitializer *list);

@@ -2375,12 +2375,11 @@ static inline bool sema_expr_analyse_type_access(Context *context, Expr *expr, T
 		if (name == kw_nan)
 		{
 			expr->expr_kind = EXPR_CONST;
-			expr->const_expr.float_type = canonical->type_kind;
 			expr->const_expr.const_kind = CONST_FLOAT;
 #if LONG_DOUBLE
-			expr->const_expr.f = nanl("");
+			expr->const_expr.fxx = (Float) { nanl(""), canonical->type_kind };
 #else
-			expr->const_expr.f = nan("");
+			expr->const_expr.fxx = (Float) { nan(""), canonical->type_kind };
 #endif
 			expr_set_type(expr, parent->type);
 			expr->pure = true;
@@ -2390,9 +2389,8 @@ static inline bool sema_expr_analyse_type_access(Context *context, Expr *expr, T
 		if (name == kw_inf)
 		{
 			expr->expr_kind = EXPR_CONST;
-			expr->const_expr.float_type = parent->type->canonical->type_kind;;
 			expr->const_expr.const_kind = CONST_FLOAT;
-			expr->const_expr.f = INFINITY;
+			expr->const_expr.fxx = (Float) { INFINITY, parent->type->canonical->type_kind };
 			expr_set_type(expr, parent->type->canonical);
 			expr->pure = true;
 			expr->resolve_status = RESOLVE_DONE;
@@ -3786,7 +3784,7 @@ static bool sema_expr_analyse_common_assign(Context *context, Expr *expr, Expr *
 					}
 					break;
 				case CONST_FLOAT:
-					if (right->const_expr.f == 0)
+					if (right->const_expr.fxx.f == 0)
 					{
 						SEMA_ERROR(right, "Division by zero not allowed.");
 						return false;
@@ -4047,7 +4045,7 @@ static bool sema_expr_analyse_sub(Context *context, Expr *expr, Expr *left, Expr
 				expr->const_expr.ixx = int_sub(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case ALL_FLOATS:
-				expr->const_expr.f = left->const_expr.f - right->const_expr.f;
+				expr->const_expr.fxx = float_sub(left->const_expr.fxx, right->const_expr.fxx);
 				break;
 			default:
 				UNREACHABLE
@@ -4136,7 +4134,7 @@ static bool sema_expr_analyse_add(Context *context, Expr *expr, Expr *left, Expr
 				expr->const_expr.ixx = int_add(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case CONST_FLOAT:
-				expr->const_expr.f = left->const_expr.f + right->const_expr.f;
+				expr->const_expr.fxx = float_add(left->const_expr.fxx, right->const_expr.fxx);
 				break;
 			default:
 				UNREACHABLE
@@ -4185,7 +4183,7 @@ static bool sema_expr_analyse_mult(Context *context, Expr *expr, Expr *left, Exp
 				expr->const_expr.ixx = int_mul(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case CONST_FLOAT:
-				expr->const_expr.f = left->const_expr.f * right->const_expr.f;
+				expr->const_expr.fxx = float_mul(left->const_expr.fxx, right->const_expr.fxx);
 				break;
 			default:
 				UNREACHABLE
@@ -4245,7 +4243,7 @@ static bool sema_expr_analyse_div(Context *context, Expr *expr, Expr *left, Expr
 				expr->const_expr.ixx = int_div(left->const_expr.ixx, right->const_expr.ixx);
 				break;
 			case CONST_FLOAT:
-				expr->const_expr.f = left->const_expr.f / right->const_expr.f;
+				expr->const_expr.fxx = float_div(left->const_expr.fxx, right->const_expr.fxx);
 				break;
 			default:
 				UNREACHABLE
@@ -4832,7 +4830,7 @@ static bool sema_expr_analyse_neg(Context *context, Expr *expr, Expr *inner)
 			expr->const_expr.ixx = int_neg(inner->const_expr.ixx);
 			return true;
 		case CONST_FLOAT:
-			expr->const_expr.f = -expr->const_expr.f;
+			expr->const_expr.fxx = float_neg(expr->const_expr.fxx);
 			break;
 		default:
 			UNREACHABLE

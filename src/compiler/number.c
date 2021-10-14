@@ -7,14 +7,14 @@
 
 void expr_const_set_int(ExprConst *expr, uint64_t v, TypeKind kind)
 {
-	expr->i.high = 0;
+	expr->ixx.i.high = 0;
 	if (type_kind_is_signed(kind))
 	{
-		if (v > (uint64_t)INT64_MAX) expr->i.high = UINT64_MAX;
+		if (v > (uint64_t)INT64_MAX) expr->ixx.i.high = UINT64_MAX;
 	}
-	expr->i.low = v;
+	expr->ixx.i.low = v;
+	expr->ixx.type = kind;
 	expr->const_kind = CONST_INTEGER;
-	expr->int_type = kind;
 }
 
 void expr_const_set_bool(ExprConst *expr, bool b)
@@ -80,7 +80,7 @@ bool expr_const_compare(const ExprConst *left, const ExprConst *right, BinaryOp 
 		case CONST_INTEGER:
 			return int_comp(left->ixx, right->ixx, op);
 		case CONST_FLOAT:
-			return compare_fps(left->f, right->f, op);
+			return compare_fps(left->fxx.f, right->fxx.f, op);
 		case CONST_POINTER:
 			return true;
 		case CONST_STRING:
@@ -179,10 +179,6 @@ bool expr_const_will_overflow(const ExprConst *expr, TypeKind kind)
 	}
 }
 
-bool expr_const_int_overflowed(const ExprConst *expr)
-{
-	return expr_const_will_overflow(expr, expr->int_type);
-}
 const char *expr_const_to_error_string(const ExprConst *expr)
 {
 	char *buff = NULL;
@@ -196,9 +192,9 @@ const char *expr_const_to_error_string(const ExprConst *expr)
 			return int_to_str(expr->ixx, 10);
 		case CONST_FLOAT:
 #if LONG_DOUBLE
-			asprintf(&buff, "%Lg", expr->f);
+			asprintf(&buff, "%Lg", expr->fxx.f);
 #else
-			asprintf(&buff, "%g", expr->f);
+			asprintf(&buff, "%g", expr->fxx.f);
 #endif
 			return buff;
 		case CONST_STRING:
@@ -224,16 +220,16 @@ void expr_const_set_float(ExprConst *expr, Real d, TypeKind kind)
 	switch (kind)
 	{
 		case TYPE_F32:
-			expr->f = (float)d;
+			expr->fxx = (Float) { (float)d, TYPE_F32 };
 			break;
 		case TYPE_F64:
-			expr->f = (double)d;
+			expr->fxx = (Float) { (double)d, TYPE_F64 };
 			break;
 		default:
-			expr->f = d;
+			expr->fxx = (Float) { d, kind };
+			break;
 	}
 	expr->const_kind = CONST_FLOAT;
-	expr->float_type = kind;
 }
 
 ByteSize expr_const_list_size(const ConstInitializer *list)

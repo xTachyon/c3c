@@ -2858,21 +2858,21 @@ void gencontext_emit_ternary_expr(GenContext *c, BEValue *value, Expr *expr)
 
 	llvm_value_set(value, phi, expr->type);
 }
-static LLVMValueRef llvm_emit_real(LLVMTypeRef type, Real f)
+static LLVMValueRef llvm_emit_real(LLVMTypeRef type, Float f)
 {
-	if (isnan(f))
+	if (isnan(f.f))
 	{
 		return LLVMConstRealOfString(type, "nan");
 	}
-	if (isinf(f))
+	if (isinf(f.f))
 	{
-		return LLVMConstRealOfString(type, f < 0 ? "-inf" : "inf");
+		return LLVMConstRealOfString(type, f.f < 0 ? "-inf" : "inf");
 	}
 	scratch_buffer_clear();
 #if LONG_DOUBLE
-	global_context.scratch_buffer_len = sprintf(global_context.scratch_buffer, "%La", f);
+	global_context.scratch_buffer_len = sprintf(global_context.scratch_buffer, "%La", f.f);
 #else
-	global_context.scratch_buffer_len = sprintf(global_context.scratch_buffer, "%a", f);
+	global_context.scratch_buffer_len = sprintf(global_context.scratch_buffer, "%a", f.f);
 #endif
 	return LLVMConstRealOfStringAndSize(type, global_context.scratch_buffer, global_context.scratch_buffer_len);
 }
@@ -2933,7 +2933,7 @@ static void llvm_emit_const_expr(GenContext *c, BEValue *be_value, Expr *expr)
 			llvm_emit_const_initializer_list_expr(c, be_value, expr);
 			return;
 		case CONST_FLOAT:
-			llvm_value_set(be_value, llvm_emit_real(llvm_get_type(c, type), expr->const_expr.f), type);
+			llvm_value_set(be_value, llvm_emit_real(llvm_get_type(c, type), expr->const_expr.fxx), type);
 			return;
 		case CONST_POINTER:
 			llvm_value_set(be_value, LLVMConstNull(llvm_get_type(c, type)), type);

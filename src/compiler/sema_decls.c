@@ -668,8 +668,7 @@ static inline bool sema_analyse_enum(Context *context, Decl *decl)
 			expr_set_type(expr, type);
 			expr->resolve_status = RESOLVE_NOT_DONE;
 			REMINDER("Do range check");
-			expr->const_expr.i = value;
-			expr->const_expr.int_type = canonical->type_kind;
+			expr->const_expr.ixx = (Int) { value, canonical->type_kind };
 			expr->const_expr.const_kind = CONST_INTEGER;
 			expr->const_expr.narrowable = true;
 			expr_set_type(expr, canonical);

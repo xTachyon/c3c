@@ -76,17 +76,16 @@ static void const_int_to_fp_cast(Expr *expr, Type *canonical, Type *type)
 	switch (canonical->type_kind)
 	{
 		case TYPE_F32:
-			expr->const_expr.f = (float)f;
+			expr->const_expr.fxx = (Float) { (float)f, TYPE_F32 };
 			break;
 		case TYPE_F64:
-			expr->const_expr.f = (double)f;
+			expr->const_expr.fxx = (Float) { (double)f, TYPE_F64 };
 			break;
 		default:
-			expr->const_expr.f = f;
+			expr->const_expr.fxx = (Float) { f, canonical->type_kind };
 			break;
 	}
-	expr_set_type(expr, type);
-	expr->const_expr.float_type = canonical->type_kind;
+	expr->type = type;
 	expr->const_expr.const_kind = CONST_FLOAT;
 	expr->const_expr.narrowable = false;
 }
@@ -140,7 +139,7 @@ bool float_to_bool(Expr *expr, Type *type)
 {
 	if (insert_runtime_cast_unless_const(expr, CAST_FPBOOL, type)) return true;
 
-	expr_const_set_bool(&expr->const_expr, expr->const_expr.f != 0.0);
+	expr_const_set_bool(&expr->const_expr, expr->const_expr.fxx.f != 0.0);
 	expr_set_type(expr, type);
 	expr->const_expr.narrowable = false;
 	return true;
@@ -154,8 +153,8 @@ static bool float_to_float(Expr* expr, Type *canonical, Type *type)
 {
 	if (insert_runtime_cast_unless_const(expr, CAST_FPFP, type)) return true;
 
-	expr_const_set_float(&expr->const_expr, expr->const_expr.f, canonical->type_kind);
-	expr_set_type(expr, type);
+	expr_const_set_float(&expr->const_expr, expr->const_expr.fxx.f, canonical->type_kind);
+	expr->type = type;
 	expr->const_expr.narrowable = false;
 	return true;
 }
@@ -169,9 +168,8 @@ bool float_to_integer(Expr *expr, Type *canonical, Type *type)
 	if (insert_runtime_cast_unless_const(expr, is_signed ? CAST_FPSI : CAST_FPUI, type)) return true;
 
 	assert(type_is_integer(canonical));
-	Real d = expr->const_expr.f;
+	Real d = expr->const_expr.fxx.f;
 	expr->const_expr.ixx = int_from_real(d, canonical->type_kind);
-	expr->const_expr.int_type = canonical->type_kind;
 	expr->const_expr.const_kind = CONST_INTEGER;
 	expr_set_type(expr, type);
 	expr->const_expr.narrowable = false;
@@ -191,7 +189,6 @@ static bool int_literal_to_int(Expr *expr, Type *canonical, Type *type)
 		UNREACHABLE
 	}
 	expr->const_expr.ixx = int_conv(expr->const_expr.ixx, canonical->type_kind);
-	expr->const_expr.int_type = canonical->type_kind;
 	assert(expr->const_expr.const_kind == CONST_INTEGER);
 	expr_set_type(expr, type);
 	expr->const_expr.narrowable = false;
@@ -214,9 +211,8 @@ static bool int_conversion(Expr *expr, CastKind kind, Type *canonical, Type *typ
 	if (insert_runtime_cast_unless_const(expr, kind, type)) return true;
 
 	expr->const_expr.ixx = int_conv(expr->const_expr.ixx, canonical->type_kind);
-	expr->const_expr.int_type = canonical->type_kind;
 	expr->const_expr.const_kind = CONST_INTEGER;
-	expr_set_type(expr, type);
+	expr->type = type;
 	expr->const_expr.narrowable = false;
 	return true;
 }
@@ -247,7 +243,7 @@ static bool int_literal_to_float(Expr *expr, Type *canonical, Type *type)
 static bool int_literal_to_bool(Expr *expr, Type *type)
 {
 	assert(expr->expr_kind == EXPR_CONST);
-	expr_const_set_bool(&expr->const_expr, !i128_is_zero(expr->const_expr.i));
+	expr_const_set_bool(&expr->const_expr, !int_is_zero(expr->const_expr.ixx));
 	expr->const_expr.narrowable = false;
 	expr_set_type(expr, type);
 	return true;
@@ -675,12 +671,12 @@ bool may_convert_float_const_implicit(Expr *expr, Type *to_type)
 		default:
 			UNREACHABLE
 	}
-	if (expr->const_expr.f < -lo_limit || expr->const_expr.f > hi_limit)
+	if (expr->const_expr.fxx.f < -lo_limit || expr->const_expr.fxx.f > hi_limit)
 	{
 #if LONG_DOUBLE
-		SEMA_ERROR(expr, "The value '%Lg' is out of range for %s, so you need an explicit cast to truncate the value.", expr->const_expr.f, type_quoted_error_string(to_type));
+		SEMA_ERROR(expr, "The value '%Lg' is out of range for %s, so you need an explicit cast to truncate the value.", expr->const_expr.fxx.f, type_quoted_error_string(to_type));
 #else
-		SEMA_ERROR(expr, "The value '%g' is out of range for %s, so you need an explicit cast to truncate the value.", expr->const_expr.f, type_quoted_error_string(to_type));
+		SEMA_ERROR(expr, "The value '%g' is out of range for %s, so you need an explicit cast to truncate the value.", expr->const_expr.fxx.f, type_quoted_error_string(to_type));
 #endif
 		return false;
 	}
@@ -711,7 +707,7 @@ bool float_const_fits_type(Expr *expr, Type *to_type)
 		default:
 			UNREACHABLE
 	}
-	return expr->const_expr.f >= -lo_limit && expr->const_expr.f <= hi_limit;
+	return expr->const_expr.fxx.f >= -lo_limit && expr->const_expr.fxx.f <= hi_limit;
 }
 
 bool may_convert_int_const_implicit(Expr *expr, Type *to_type)
@@ -720,7 +716,7 @@ bool may_convert_int_const_implicit(Expr *expr, Type *to_type)
 	if (expr_const_will_overflow(&expr->const_expr, to_type_flat->type_kind))
 	{
 		SEMA_ERROR(expr, "The value '%s' is out of range for %s, it can be truncated with an explicit cast.",
-		           i128_to_string(expr->const_expr.i, 10, type_is_signed(to_type_flat)), type_quoted_error_string(to_type));
+		           int_to_str(expr->const_expr.ixx, 10), type_quoted_error_string(to_type));
 		return false;
 	}
 	return true;
