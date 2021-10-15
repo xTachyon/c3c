@@ -970,19 +970,7 @@ static Expr *parse_integer(Context *context, Expr *left)
 				if (c == '_') continue;
 				if (i.high > max) wrapped = true;
 				i = i128_shl64(i, 4);
-
-				if (c < 'A')
-				{
-					i = i128_add64(i, c - '0');
-				}
-				else if (c < 'a')
-				{
-					i = i128_add64(i, c - 'A' + 10);
-				}
-				else
-				{
-					i = i128_add64(i, c - 'a' + 10);
-				}
+				i = i128_add64(i, hex_nibble(c));
 				hex_characters++;
 			}
 			break;

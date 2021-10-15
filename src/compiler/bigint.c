@@ -70,10 +70,16 @@ char *int_to_str(Int i, int radix)
 	return i128_to_string(i.i, radix, type_kind_is_signed(i.type));
 }
 
+
 Int int_from_real(Real d, TypeKind type)
 {
 	return (Int) { type_kind_is_unsigned(type) ? i128_from_float_unsigned(d) : i128_from_float_signed(d),
 				   type };
+}
+
+Int128 i128_from_int(uint64_t i)
+{
+	return (Int128) { 0, i };
 }
 
 Int128 i128_from_str(const char *str)
@@ -83,6 +89,30 @@ Int128 i128_from_str(const char *str)
 	while ((c = *(str++)) != 0)
 	{
 		x = i128_add64(i128_mult64(x, 10), c - '0');
+	}
+	return x;
+}
+
+Int128 i128_from_strl(const char *str, const char *end)
+{
+	char c;
+	Int128 x = { 0, 0 };
+	while (str != end)
+	{
+		c = *(str++);
+		x = i128_add64(i128_mult64(x, 10), c - '0');
+	}
+	return x;
+}
+
+Int128 i128_from_hexstrl(const char *str, const char *end)
+{
+	char c;
+	Int128 x = { 0, 0 };
+	while (str != end)
+	{
+		c = *(str++);
+		x = i128_add64(i128_shl64(x, 4), hex_nibble(c));
 	}
 	return x;
 }
@@ -258,14 +288,6 @@ Int128 i128_lshr64(Int128 op1, uint64_t amount)
 	return op1;
 }
 
-Real i128_to_float(Int128 op)
-{
-	Real x = op.high;
-	x *= 0x100000000000000;
-	x *= 0x10;
-	x += op.low;
-	return x;
-}
 
 #define U64F ((Real)0x100000000000000 * (Real)(0x10))
 Int128 i128_from_float_signed(Real d)
@@ -319,7 +341,7 @@ Int128 i128_ashr64(Int128 op1, uint64_t amount)
 	if (amount > 127) return (Int128) { UINT64_MAX, UINT64_MAX };
 	if (amount == 64) return (Int128) { UINT64_MAX, op1.high };
 	if (amount > 64) return (Int128) { UINT64_MAX, ((int64_t)op1.high) >> (amount - 64) };
-	return (Int128) { ((int64_t)op1.high) >> amount, op1.low >> amount | op1.high << (64 - amount) };
+	return (Int128) { ((int64_t)op1.high) >> amount, op1.low >> amount | (op1.high << (64 - amount)) };
 }
 
 Int128 i128_ashr(Int128 op1, Int128 op2)
@@ -407,6 +429,19 @@ uint32_t nlz128(Int128 op)
 	return op.high ? nlz64(op.high) : nlz64(op.low) + 64;
 }
 
+Real i128_to_float(Int128 op)
+{
+	return (Real)op.low + (Real)ldexp(op.high, 64);
+}
+
+Real i128_to_float_signed(Int128 op)
+{
+	if ((int64_t)op.high < 0 && (op.high != INT128_MIN.high || op.low != INT128_MIN.low))
+	{
+		return -i128_to_float_signed(i128_neg(op));
+	}
+	return (Real)op.low + (Real)ldexp(op.high, 64);
+}
 
 void int128_udivrem(Int128 op1, Int128 op2, Int128 *div, Int128 *rem)
 {
@@ -771,9 +806,9 @@ Int int_shl64(Int op1, uint64_t op2)
 
 Real int_to_real(Int op)
 {
-	if (type_kind_is_signed(op.type) && i128_is_neg(op.i))
+	if (type_kind_is_signed(op.type))
 	{
-		return -i128_to_float(i128_neg(op.i));
+		return i128_to_float_signed(op.i);
 	}
 	return i128_to_float(op.i);
 }
@@ -812,4 +847,124 @@ Float float_neg(Float op)
 {
 	op.f = -op.f;
 	return op;
+}
+
+bool i128_can_convert_from_double(double x)
+{
+	return isfinite(x)
+	       && x > -1
+	       && x < ldexp(1, 128);
+}
+
+bool i128_can_convert_from_double_signed(double x)
+{
+	return isfinite(x)
+	       && x >= -ldexp(1, 127)
+	       && x < ldexp(1, 127);
+}
+
+Int128 i128_from_double(double x)
+{
+	if (x >= ldexp(1, 64))
+	{
+		uint64_t hi = (uint64_t)ldexp(x, -64);
+		uint64_t lo = (uint64_t)(x - ldexp(hi, 64));
+		return (Int128) { hi, lo };
+	}
+	return i128_from_int((uint64_t)x);
+}
+
+Int128 i128_from_double_signed(double x)
+{
+	return x < 0 ? i128_neg(i128_from_signed(-x)) : i128_from_int(x);
+}
+
+// DO not
+double float_from_string(const char *string, const char **end)
+{
+	const char *index = string;
+	char c;
+	double in = 0;
+	while ((c = *(index++)) && (c == '_' || (c >= '0' && c <= '9')))
+	{
+		if (c == '_') continue;
+		in = in * 10 + (c - '0');
+	}
+	int exp_mod = 0;
+	if (c == '.')
+	{
+		while ((c = *(index++)) && (c == '_' || (c >= '0' && c <= '9')))
+		{
+			if (c == '_') continue;
+			in = in * 10 + (c - '0');
+			exp_mod--;
+		}
+	}
+	int64_t exp = 0;
+	bool sign = false;
+	if (c == 'e' || c == 'E')
+	{
+		if (*index == '-')
+		{
+			sign = true;
+			index++;
+		}
+		else if (*index == '+') index++;
+		while ((c = *(index++)) && (c >= '0' && c <= '9'))
+		{
+			exp = exp * 10 + (c - '0');
+		}
+		exp = sign ? -exp : exp;
+	}
+	exp = exp + exp_mod;
+	if (exp != 0)
+	{
+		in = in * pow(10, exp);
+	}
+	if (end) *end = index - 1;
+	return in;
+}
+
+double float_from_hex(const char *string)
+{
+	const char *index = string;
+	char c;
+	Int128 int_part = { 0, 0 };
+	while ((c = *(index++)) && is_hex(c))
+	{
+		int_part = i128_add64(i128_shl64(int_part, 4), hex_nibble(c));
+	}
+	Real in = i128_to_float(int_part);
+	Int128 frac_part = { 0, 0 };
+	int fractions = 0;
+	if (c == '.')
+	{
+		while ((c = *(index++)) && is_hex(c))
+		{
+			fractions++;
+			frac_part = i128_add64(i128_shl64(frac_part, 4), hex_nibble(c));
+		}
+	}
+	Real fract = ldexp(i128_to_float(frac_part), -fractions * 4);
+	int64_t exp = 0;
+	bool sign = false;
+	if (c == 'p' || c == 'P')
+	{
+		if (*index == '-')
+		{
+			sign = true;
+			index++;
+		}
+		else if (*index == '+') index++;
+		while ((c = *(index++)) && (c >= '0' && c <= '9'))
+		{
+			exp = exp * 10 + (c - '0');
+		}
+	}
+	Real value = in + fract;
+	if (exp > 0)
+	{
+		value = ldexp(value, sign ? -exp : exp);
+	}
+	return value;
 }

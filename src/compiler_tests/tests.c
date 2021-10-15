@@ -180,6 +180,18 @@ void test128()
 	printf("-- i128 Div okfefe %x.\n", (unsigned)-2);
 	TEST_ASSERTF(addres.low == UINT64_MAX && addres.high == UINT64_MAX, "Div failed: %s %llx, %llx", i128_to_string(addres, 10, true), addres.high, addres.low);
 	printf("-- i128 Div ok.\n");
+
+	printf("->>> %s\n", i128_to_string(i128_from_double(1238938219823982332131232.329382), 10, true));
+	printf("->>> %s\n", i128_to_string(i128_from_double(123893821982398233e20), 10, true));
+	printf("->>> %s\n", i128_to_string(i128_from_double(123893822333200000000.0), 10, true));
+	printf("->>> %s\n", i128_to_string(i128_from_double(12389.0), 10, true));
+	printf("->>> %s\n", i128_to_string(i128_from_double(0x1A23456789000000000000000p0), 16, false));
+
+	double pi1 = float_from_hex("3.243f6a8885a3p0");
+	double pi2 = float_from_hex("0.3243f6a8885a3p4");
+	double pi3 = float_from_hex("32.43f6a8885a3p-4");
+	TEST_ASSERTF(pi1 == pi2 && pi2 == pi3, "Wasn't matching: %f / %f / %f", pi1, pi2, pi3);
+
 }
 void compiler_tests(void)
 {
