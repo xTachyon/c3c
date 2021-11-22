@@ -49,7 +49,7 @@
  */
 char *strip_drive_prefix(char *path)
 {
-	if ((*path == 'c' || *path == 'C') && path[1] == ':')
+	if ((*path == 'c' || *path == 'C' || *path == 'd' || *path == 'D') && path[1] == ':')
 	{
 		return path + 2; // remove first two characters
 	}
@@ -58,7 +58,7 @@ char *strip_drive_prefix(char *path)
 	{ // I don't *think* a relative path can start with '[char]:/' ? right?
 		// nothing can be done about this currently
 		error_exit("Illegal path %s - absolute path must start with /, \\, "
-				   "c:, or C: (file a github issue if this is a problem)");
+				   "c:, C:, d:, D: (file a github issue if this is a problem)");
 	}
 
 	// path is ok

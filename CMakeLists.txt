@@ -4,6 +4,14 @@ project(c3c)
 SET(CMAKE_FIND_PACKAGE_SORT_ORDER NATURAL)
 SET(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
 
+if (MSVC)
+    add_compile_options(
+        $<$<CONFIG:>:/MT> #---------|
+        $<$<CONFIG:Debug>:/MTd> #---|-- Statically link the runtime libraries
+        $<$<CONFIG:Release>:/MT> #--|
+    )
+endif()
+
 #set(CMAKE_BUILD_TYPE Release)
 #set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
@@ -178,7 +186,7 @@ if(UNIX)
     target_link_libraries(c3c m ${llvm_libs} c3c_wrappers ${lld_libs})
 else()
     # todo: maybe get this from llvm-config somehow? it should be in LLVM_DIR\..\..\..\bin I think.
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -LIBPATH:C:\\llvm\\llvm\\build\\Release\\lib") # needed for lldCommon.lib
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -LIBPATH:D:\\repos\\llvm-project\\build\\Debug\\lib") # needed for lldCommon.lib
     #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -LIBPATH:${LLVM_LIBPATH}") # This doesn't seem to work for some reason
     message(STATUS "${LLVM_LIBPATH}")
     target_link_libraries(c3c debug ${llvm_libs} c3c_wrappers lldCommon lldCore lldCOFF lldWASM lldMinGW lldELF lldDriver lldReaderWriter lldMachO lldYAML)
