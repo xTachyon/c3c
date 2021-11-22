@@ -140,7 +140,7 @@ static void update_build_target_from_options(BuildTarget *target, BuildOptions *
 	if (options->test_mode)
 	{
 		target->test_output = true;
-		target->emit_llvm = true;
+		target->emit_llvm = false;
 		target->emit_object_files = false;
 	}
 }
