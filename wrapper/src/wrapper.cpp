@@ -76,6 +76,7 @@ static bool llvm_link(ObjFormat format, const char **args, int arg_count, const 
 {
 	std::vector<const char*> arg_vector = std::vector<const char *>(arg_count + 1);
 	for (int i = 0; i < arg_count; i++) arg_vector.push_back(args[i]);
+	//arg_vector.push_back("/subsystem:console");
 	std::string output_string {};
 	std::string output_err_string {};
 	llvm::raw_string_ostream output { output_string };

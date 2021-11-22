@@ -1181,10 +1181,10 @@ void *llvm_target_machine_create(void)
 
 void target_setup(BuildTarget *target)
 {
-	//INITIALIZE_TARGET(ARM);
-	//INITIALIZE_TARGET(AArch64);
-	//INITIALIZE_TARGET(RISCV);
-	//INITIALIZE_TARGET(WebAssembly);
+	INITIALIZE_TARGET(ARM);
+	INITIALIZE_TARGET(AArch64);
+	INITIALIZE_TARGET(RISCV);
+	INITIALIZE_TARGET(WebAssembly);
 	INITIALIZE_TARGET(X86);
 	// To support more targets, add them above.
 

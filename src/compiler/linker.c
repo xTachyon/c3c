@@ -107,10 +107,10 @@ static bool link_exe(const char *output_file, const char **files_to_link, unsign
 #ifdef _MSC_VER
 				PathPair msvc_paths = get_latest_available_vs_path();
 				PathPair windows_kit_paths = find_winkit_path();
-				vec_add(args, join_strings((const char* []) { "-libpath:C:", msvc_paths.first }, 2));
-				vec_add(args, join_strings((const char* []) { "-libpath:C:", msvc_paths.second }, 2));
-				vec_add(args, join_strings((const char* []) { "-libpath:C:", windows_kit_paths.first }, 2));
-				vec_add(args, join_strings((const char* []) { "-libpath:C:", windows_kit_paths.second }, 2));
+				vec_add(args, join_strings((const char* []) { "-libpath:", msvc_paths.first }, 2));
+				vec_add(args, join_strings((const char* []) { "-libpath:", msvc_paths.second }, 2));
+				vec_add(args, join_strings((const char* []) { "-libpath:", windows_kit_paths.first }, 2));
+				vec_add(args, join_strings((const char* []) { "-libpath:", windows_kit_paths.second }, 2));
 
 				vec_add(args, "-defaultlib:libcmt");
 				vec_add(args, "-nologo");

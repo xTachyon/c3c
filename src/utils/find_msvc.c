@@ -8,9 +8,9 @@
 
 #include "utils/dirent.h"
 
-#define MSVC_BASE_PATH "/Program Files (x86)/Microsoft Visual Studio/"
-#define MSVC_22_BASE_PATH "/Program Files/Microsoft Visual Studio/"
-#define WINKIT_BASE_PATH "/Program Files (x86)/Windows Kits/"
+#define MSVC_BASE_PATH "C:/Program Files (x86)/Microsoft Visual Studio/"
+#define MSVC_22_BASE_PATH "C:/Program Files/Microsoft Visual Studio/"
+#define WINKIT_BASE_PATH "C:/Program Files (x86)/Windows Kits/"
 
 
 int is_numeric(const struct dirent *ent)
@@ -67,7 +67,7 @@ PathPair get_latest_available_vs_path()
 		// I don't know what the file structure will look like then, so I'm just
 		// going to leave this as is for now.
 		// TODO: deal with non-preview path
-		snprintf(newpath, 260, "%s%s/Preview/VC/Tools/MSVC/", MSVC_22_BASE_PATH, ver_name);		
+		snprintf(newpath, 260, "%s%s/Community/VC/Tools/MSVC/", MSVC_22_BASE_PATH, ver_name);		
 	}
 	free(highest_ver);
 
