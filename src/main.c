@@ -3,12 +3,16 @@
 #include "build/project_creation.h"
 #include "compiler_tests/tests.h"
 #include "utils/lib.h"
+#include <Windows.h>
 
 bool debug_log = false;
 bool debug_stats = false;
 
 int main(int argc, const char *argv[])
 {
+	//while (!IsDebuggerPresent()) { 
+	//	Sleep(100); 
+	//}
 	// First setup memory
 	memory_init();
 

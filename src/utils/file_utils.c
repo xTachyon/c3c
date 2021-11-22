@@ -47,23 +47,24 @@
  * If that is an issue, I think dirent will have to be replaced or the dirent
  * port in use will have to be replaced.
  */
-char *strip_drive_prefix(char *path)
-{
-	if ((*path == 'c' || *path == 'C' || *path == 'd' || *path == 'D') && path[1] == ':')
-	{
-		return path + 2; // remove first two characters
-	}
+//char *strip_drive_prefix(char *path)
+//{
+//	if ((*path == 'c' || *path == 'C' || *path == 'd' || *path == 'D') && path[1] == ':')
+//	{
+//		return path + 2; // remove first two characters
+//	}
+//
+//	if (path[1] == ':' && (path[2] == '/' || path[2] == '\\'))
+//	{ // I don't *think* a relative path can start with '[char]:/' ? right?
+//		// nothing can be done about this currently
+//		error_exit("Illegal path %s - absolute path must start with /, \\, "
+//				   "c:, C:, d:, D: (file a github issue if this is a problem)");
+//	}
+//
+//	// path is ok
+//	return path;
 
-	if (path[1] == ':' && (path[2] == '/' || path[2] == '\\'))
-	{ // I don't *think* a relative path can start with '[char]:/' ? right?
-		// nothing can be done about this currently
-		error_exit("Illegal path %s - absolute path must start with /, \\, "
-				   "c:, C:, d:, D: (file a github issue if this is a problem)");
-	}
-
-	// path is ok
-	return path;
-}
+//}
 
 #endif
 
@@ -264,7 +265,7 @@ void file_find_top_dir()
 void file_add_wildcard_files(const char ***files, const char *path, bool recursive)
 {
 #ifdef _MSC_VER
-	DIR *dir = opendir(strip_drive_prefix(path));
+	DIR *dir = opendir((path));
 #else
 	DIR *dir = opendir(path);
 #endif
