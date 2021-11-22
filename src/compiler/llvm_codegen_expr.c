@@ -3876,6 +3876,15 @@ LLVMValueRef llvm_emit_pointer_gep_raw(GenContext *c, LLVMTypeRef pointee_type, 
 
 LLVMValueRef llvm_emit_pointer_inbounds_gep_raw(GenContext *c, LLVMTypeRef pointee_type, LLVMValueRef ptr, LLVMValueRef offset)
 {
+	//printf("pointee_type:");
+	//LLVMDumpType(pointee_type);
+	//printf("\nptr:");
+	//LLVMDumpValue(ptr);
+	//printf("\nptr type:");
+	//LLVMDumpType(LLVMTypeOf(ptr));
+	//printf("\noffset:");
+	//LLVMDumpValue(offset);
+	//printf("\n\n");
 	if (LLVMIsConstant(ptr) && LLVMIsConstant(offset))
 	{
 		return LLVMConstInBoundsGEP2(pointee_type, ptr, &offset, 1);
@@ -4636,7 +4645,7 @@ static inline void llvm_emit_return_block(GenContext *context, BEValue *be_value
 		// Optimization, emit directly to value
 		llvm_emit_expr(context, be_value, ret_expr);
 		// And remove the alloca
-		LLVMInstructionRemoveFromParent(context->return_out);
+		LLVMInstructionEraseFromParent(context->return_out);
 		goto DONE;
 
 	} while (0);

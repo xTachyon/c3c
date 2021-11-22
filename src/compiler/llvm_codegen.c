@@ -914,7 +914,7 @@ void llvm_value_addr(GenContext *c, BEValue *value)
 		LLVMValueRef ref = LLVMAddGlobal(c->module, LLVMTypeOf(val), ".taddr");
 		llvm_set_alignment(ref, llvm_abi_alignment(c, LLVMTypeOf(val)));
 		LLVMSetLinkage(ref, LLVMPrivateLinkage);
-		LLVMSetVisibility(ref, LLVMHiddenVisibility);
+		//LLVMSetVisibility(ref, LLVMHiddenVisibility);
 		LLVMSetInitializer(ref, val);
 		llvm_emit_bitcast(c, ref, type_get_ptr(value->type));
 		llvm_value_set_address(value, ref, value->type);

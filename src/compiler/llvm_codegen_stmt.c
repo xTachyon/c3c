@@ -522,6 +522,8 @@ static void llvm_emit_foreach_stmt(GenContext *c, Ast *ast)
 
 	llvm_emit_block(c, body_block);
 
+	LLVMPrintModuleToFile(c->module, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ll", NULL);
+
 	// In the case where we have an index that is smaller, we need to do a cast.
 	if (index_var.value && index.value != index_var.value)
 	{
