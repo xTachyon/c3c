@@ -325,7 +325,7 @@ static inline bool scan_ident(Lexer *lexer, TokenType normal, TokenType const_to
 				break;
 			case '0': case '1': case '2': case '3': case '4':
 			case '5': case '6': case '7': case '8': case '9':
-				if (!type) return add_error_token(lexer, "A letter must preceed any digit");
+				if (!type) return add_error_token(lexer, "A letter must precede any digit");
 			case '_':
 				break;
 			default:
@@ -476,24 +476,7 @@ static inline bool scan_hex(Lexer *lexer)
 	}
 	if (prev(lexer) == '_') return add_error_token(lexer, "The number ended with '_', but that character needs to be between, not after, digits.");
 	if (!scan_number_suffix(lexer, &is_float)) return false;
-	if (is_float)
-	{
-		// IMPROVE
-		// For the float we actually parse things, using strtold
-		// this is not ideal, we should try to use f128 if possible for example.
-		// Possibly we should move to a BigDecimal implementation or at least a soft float 256
-		// implementation for the constants.
-		char *err = NULL;
-		Float f = float_from_hex(lexer->lexing_start, &err);
-		if (f.type == TYPE_POISONED)
-		{
-			return add_error_token(lexer, err);
-		}
-		add_generic_token(lexer, TOKEN_REAL);
-		lexer->latest_token_data->value = f;
-		return true;
-	}
-	return add_token(lexer, TOKEN_INTEGER, lexer->lexing_start);
+	return add_token(lexer, is_float ? TOKEN_REAL : TOKEN_INTEGER, lexer->lexing_start);
 }
 
 /**
@@ -536,24 +519,7 @@ static inline bool scan_dec(Lexer *lexer)
 
 	if (prev(lexer) == '_') return add_error_token(lexer, "The number ended with '_', but that character needs to be between, not after, digits.");
 	if (!scan_number_suffix(lexer, &is_float)) return false;
-	if (is_float)
-	{
-		// IMPROVE
-		// For the float we actually parse things, using strtold
-		// this is not ideal, we should try to use f128 if possible for example.
-		// Possibly we should move to a BigDecimal implementation or at least a soft float 256
-		// implementation for the constants.
-		char *err = NULL;
-		Float f = float_from_string(lexer->lexing_start, &err);
-		if (f.type == TYPE_POISONED)
-		{
-			return add_error_token(lexer, err);
-		}
-		add_generic_token(lexer, TOKEN_REAL);
-		lexer->latest_token_data->value = f;
-		return true;
-	}
-	return add_token(lexer, TOKEN_INTEGER, lexer->lexing_start);
+	return add_token(lexer, is_float ? TOKEN_REAL : TOKEN_INTEGER, lexer->lexing_start);
 }
 
 /**
@@ -696,7 +662,11 @@ static inline bool scan_char(Lexer *lexer)
 	while ((c = next(lexer)) != '\'')
 	{
 		// End of file may occur:
-		if (c == '\0') return add_error_token(lexer, "The character literal did not terminate.");
+		if (c == '\0')
+		{
+			backtrack(lexer);
+			return add_error_token(lexer, "The character literal did not terminate.");
+		}
 		// We might exceed the width that we allow.
 		if (width > 15) return add_error_token(lexer, "The character literal exceeds 16 characters.");
 		// Handle (expected) utf-8 characters.
@@ -951,6 +921,7 @@ static inline size_t scan_multiline_indent(const char *current, const char **end
 	// 8. If we ended on EOF
 	if (c == '\0')
 	{
+		current--;
 		*end_ref = current;
 		*min_indent_ref = 0;
 		return len;
@@ -984,6 +955,7 @@ bool scan_consume_end_of_multiline(Lexer *lexer, bool error_on_eof)
 		char c = next(lexer);
 		if (c == '\0')
 		{
+			backtrack(lexer);
 			if (!error_on_eof) return false;
 			return add_error_token_at(lexer, lexer->current - 1, 1, "The multi-line string unexpectedly ended. "
 																 "Did you forget a '\"\"\"' somewhere?");
