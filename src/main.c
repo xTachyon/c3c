@@ -7,6 +7,33 @@
 bool debug_log = false;
 bool debug_stats = false;
 
+#ifdef C3_FUZZ
+#include <setjmp.h>
+#define main not_main
+
+int main(int argc, const char *argv[]);
+
+jmp_buf fuzz_jump_buffer;
+
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+	const char* test_file = "./test.c3";
+	FILE* file = fopen(test_file, "wb");
+	fwrite(data, 1, size, file);
+	fclose(file);
+	const char* argv[] = {
+		"c3",
+		"compile",
+		test_file
+	};
+
+	setjmp(fuzz_jump_buffer);
+	main(sizeof(argv) / sizeof(*argv), argv);
+
+	return 0;
+}
+
+#endif
+
 int main(int argc, const char *argv[])
 {
 	// First setup memory

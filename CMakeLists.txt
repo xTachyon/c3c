@@ -7,6 +7,12 @@ SET(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
 #set(CMAKE_BUILD_TYPE Release)
 #set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
+if(C3_FUZZ)
+    add_definitions(-DC3_FUZZ)
+    add_compile_options(-fsanitize=fuzzer,address -g -O1)
+    add_link_options(-fsanitize=fuzzer,address)
+endif()
+
 find_package(LLVM REQUIRED CONFIG)
 
 
