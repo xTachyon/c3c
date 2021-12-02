@@ -8,12 +8,9 @@ bool debug_log = false;
 bool debug_stats = false;
 
 #ifdef C3_FUZZ
-#include <setjmp.h>
 #define main not_main
 
 int main(int argc, const char *argv[]);
-
-jmp_buf fuzz_jump_buffer;
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 	const char* test_file = "./test.c3";
@@ -26,7 +23,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 		test_file
 	};
 
-	setjmp(fuzz_jump_buffer);
 	main(sizeof(argv) / sizeof(*argv), argv);
 
 	return 0;
@@ -34,8 +30,30 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
 #endif
 
-int main(int argc, const char *argv[])
+jmp_buf on_error_jump;
+
+NORETURN void exit_compiler(int exit_value)
 {
+	assert(exit_value != 0);
+	longjmp(on_error_jump, exit_value);
+}
+
+static void cleanup()
+{
+	memory_release();
+}
+
+
+int main_real(int argc, const char *argv[])
+{
+	int result = setjmp(on_error_jump);
+	if (result)
+	{
+		cleanup();
+		if (result == COMPILER_SUCCESS_EXIT) result = EXIT_SUCCESS;
+		return result;
+	}
+
 	// First setup memory
 	memory_init();
 
@@ -73,7 +91,11 @@ int main(int argc, const char *argv[])
 	}
 
 	print_arena_status();
-	free_arena();
+	memory_release();
 	return 0;
 }
 
+int main(int argc, const char *argv[])
+{
+	return main_real(argc, argv);
+}
