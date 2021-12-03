@@ -8,19 +8,30 @@ bool debug_log = false;
 bool debug_stats = false;
 
 #ifdef C3_FUZZ
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #define main not_main
 
 int main(int argc, const char *argv[]);
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-	const char* test_file = "./test.c3";
+	mkdir("tmp", 0700);
+
+	char test_file[1024];
+	sprintf(test_file, "tmp/test_%u.c3", (unsigned) getpid());
+	// char out_file[1024];
+	// sprintf(out_file, "tmp/out_%u.c3", (unsigned) getpid());
+
 	FILE* file = fopen(test_file, "wb");
 	fwrite(data, 1, size, file);
 	fclose(file);
 	const char* argv[] = {
 		"c3",
-		"compile",
-		test_file
+		"compile-only",
+		test_file,
+		// "-o",
+		// out_file
 	};
 
 	main(sizeof(argv) / sizeof(*argv), argv);

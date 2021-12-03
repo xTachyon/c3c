@@ -19,12 +19,6 @@ void eprintf(const char *format, ...)
 	va_end(arglist);
 }
 
-#ifdef C3_FUZZ
-#include <setjmp.h>
-
-extern jmp_buf fuzz_jump_buffer;
-#endif
-
 NORETURN void error_exit(const char *format, ...)
 {
 	va_list arglist;

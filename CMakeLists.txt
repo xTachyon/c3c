@@ -9,7 +9,7 @@ SET(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
 
 if(C3_FUZZ)
     add_definitions(-DC3_FUZZ)
-    add_compile_options(-fsanitize=fuzzer,address -g -O1)
+    add_compile_options(-fsanitize=fuzzer,address -g -O2)
     add_link_options(-fsanitize=fuzzer,address)
 endif()
 
