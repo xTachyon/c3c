@@ -54,7 +54,7 @@ jobs:
       - uses: msys2/setup-msys2@v2
         with:
           msystem: CLANG64
-          update: true
+          update: false
           install: git binutils mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python
 
       - name: CMake
@@ -79,7 +79,7 @@ jobs:
         build_type: [Release, Debug]
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
       - name: (Ubuntu) Download LLVM
         run: |
           sudo apt-get install zlib1g zlib1g-dev clang-12 libllvm12 llvm-12 llvm-12-dev llvm-12-runtime liblld-12-dev liblld-12 python3

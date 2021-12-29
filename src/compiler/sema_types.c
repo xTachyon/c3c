@@ -78,7 +78,15 @@ static inline bool sema_resolve_array_type(Context *context, TypeInfo *type, boo
 			return type_info_poison(type);
 		}
 	}
-
+	Type *distinct_base = type_flatten_distinct(type->array.base->type);
+	if (distinct_base->type_kind == TYPE_STRUCT)
+	{
+		if (distinct_base->decl->has_variable_array)
+		{
+			SEMA_ERROR(type, "Arrays of structs with flexible array members is not allowed.");
+			return type_info_poison(type);
+		}
+	}
 	switch (type->kind)
 	{
 		case TYPE_INFO_SUBARRAY:
@@ -105,6 +113,7 @@ static inline bool sema_resolve_array_type(Context *context, TypeInfo *type, boo
 			UNREACHABLE
 	}
 	assert(!type->array.len || type->array.len->expr_kind == EXPR_CONST);
+	if (type->array.base)
 	type->resolve_status = RESOLVE_DONE;
 	return true;
 }
@@ -129,12 +138,12 @@ static bool sema_resolve_type_identifier(Context *context, TypeInfo *type_info)
 		case DECL_UNION:
 		case DECL_ERRTYPE:
 		case DECL_ENUM:
-		case DECL_TYPEDEF:
-		case DECL_DISTINCT:
 			type_info->type = decl->type;
 			type_info->resolve_status = RESOLVE_DONE;
 			DEBUG_LOG("Resolved %s.", TOKSTR(type_info->unresolved.name_loc));
 			return true;
+		case DECL_TYPEDEF:
+		case DECL_DISTINCT:
 		case DECL_DEFINE:
 			if (!sema_analyse_decl(context, decl)) return type_info_poison(type_info);
 			type_info->type = decl->type;
@@ -193,7 +202,6 @@ bool sema_resolve_type(Context *context, Type *type)
 		case TYPE_TYPEID:
 		case TYPE_ANY:
 		case TYPE_ANYERR:
-		case TYPE_STRLIT:
 		case TYPE_VECTOR:
 		case TYPE_TYPEINFO:
 		case TYPE_UNTYPED_LIST:
@@ -212,6 +220,7 @@ bool sema_resolve_type(Context *context, Type *type)
 		case TYPE_ARRAY:
 		case TYPE_SUBARRAY:
 		case TYPE_INFERRED_ARRAY:
+		case TYPE_FLEXIBLE_ARRAY:
 			return sema_resolve_type(context, type->array.base);
 		case TYPE_FAILABLE:
 			return sema_resolve_type(context, type->failable);

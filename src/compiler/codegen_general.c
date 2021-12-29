@@ -1,34 +1,5 @@
 #include "codegen_internal.h"
 
-bool type_is_empty_field(Type *type, bool allow_array)
-{
-	type = type_lowering(type);
-	if (allow_array)
-	{
-		while (type->type_kind == TYPE_ARRAY)
-		{
-			if (type->array.len == 0) return true;
-			type = type_lowering(type->array.base);
-		}
-	}
-	return type_is_empty_record(type, allow_array);
-}
-
-bool type_is_empty_record(Type *type, bool allow_array)
-{
-	if (!type_is_union_struct(type)) return false;
-
-	Decl *decl = type->decl;
-	if (decl->has_variable_array) return false;
-
-	Decl **members = decl->strukt.members;
-	VECEACH(members, i)
-	{
-		if (!type_is_empty_field(members[i]->type, allow_array)) return false;
-	}
-	return true;
-}
-
 /**
  * Based on isSingleElementStruct in Clang
  */
@@ -44,9 +15,6 @@ Type *type_abi_find_single_struct_element(Type *type)
 	VECEACH(members, i)
 	{
 		Type *field_type = type_lowering(members[i]->type);
-
-		// Ignore empty arrays
-		if (type_is_empty_field(field_type, true)) continue;
 
 		// Already one field found, not single field.
 		if (found) return NULL;
@@ -210,7 +178,6 @@ bool type_is_homogenous_aggregate(Type *type, Type **base, unsigned *elements)
 		case TYPE_VOID:
 		case TYPE_TYPEID:
 		case TYPE_FUNC:
-		case TYPE_STRLIT:
 		case TYPE_SUBARRAY:
 		case CT_TYPES:
 		case TYPE_FAILABLE_ANY:
@@ -240,14 +207,11 @@ bool type_is_homogenous_aggregate(Type *type, Type **base, unsigned *elements)
 					// Go down deep into  a nester array.
 					while (member_type->type_kind == TYPE_ARRAY)
 					{
-						// If we find a zero length array, this is not allowed.
-						if (member_type->array.len == 0) return false;
+						assert(member_type->array.len && "Zero length arrays not allowed");
 						member_mult *= member_type->array.len;
 						member_type = member_type->array.base;
 					}
 					unsigned member_members = 0;
-					// Skip any empty record.
-					if (type_is_empty_record(member_type, true)) continue;
 
 					// Check recursively if the field member is homogenous
 					if (!type_is_homogenous_aggregate(member_type, base, &member_members)) return false;
@@ -269,6 +233,8 @@ bool type_is_homogenous_aggregate(Type *type, Type **base, unsigned *elements)
 				if (type_size(*base) * *elements != type_size(type)) return false;
 			}
 			goto TYPECHECK;
+		case TYPE_FLEXIBLE_ARRAY:
+			return false;
 		case TYPE_ARRAY:
 			// Empty arrays? Not homogenous.
 			if (type->array.len == 0) return false;

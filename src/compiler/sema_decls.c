@@ -83,19 +83,30 @@ static inline bool sema_analyse_struct_member(Context *context, Decl *decl)
 		}
 		if (decl->name) sema_add_member(context, decl);
 	}
+
 	switch (decl->decl_kind)
 	{
 		case DECL_VAR:
 			assert(decl->var.kind == VARDECL_MEMBER);
 			decl->resolve_status = RESOLVE_RUNNING;
-			if (!sema_resolve_type_info(context, decl->var.type_info)) return decl_poison(decl);
+			if (!sema_resolve_type_info_maybe_inferred(context, decl->var.type_info, true)) return decl_poison(decl);
 			decl->type = decl->var.type_info->type;
 			decl->resolve_status = RESOLVE_DONE;
+			Type *member_type = type_flatten_distinct(decl->type);
+			if (member_type->type_kind == TYPE_ARRAY)
+			{
+				if (member_type->array.len == 0)
+				{
+					SEMA_ERROR(decl, "Zero length arrays are not valid members.");
+					return false;
+				}
+			}
 			return true;
 		case DECL_STRUCT:
 		case DECL_UNION:
 		case DECL_BITSTRUCT:
-			return sema_analyse_decl(context, decl);
+			if (!sema_analyse_decl(context, decl)) return false;
+			return true;
 		default:
 			UNREACHABLE
 	}
@@ -107,6 +118,7 @@ static bool sema_analyse_union_members(Context *context, Decl *decl, Decl **memb
 	MemberIndex max_alignment_element = 0;
 	AlignSize max_alignment = 0;
 
+	bool has_named_parameter = false;
 	VECEACH(members, i)
 	{
 		Decl *member = members[i];
@@ -124,7 +136,11 @@ static bool sema_analyse_union_members(Context *context, Decl *decl, Decl **memb
 			}
 			continue;
 		}
-
+		if (member->type->type_kind == TYPE_INFERRED_ARRAY)
+		{
+			SEMA_ERROR(member, "Flexible array members not allowed in unions.");
+			return false;
+		}
 		AlignSize member_alignment = type_abi_alignment(member->type);
 		ByteSize member_size = type_size(member->type);
 		assert(member_size <= MAX_TYPE_SIZE);
@@ -195,13 +211,14 @@ static bool sema_analyse_union_members(Context *context, Decl *decl, Decl **memb
 
 static bool sema_analyse_struct_members(Context *context, Decl *decl, Decl **members)
 {
-	// Default alignment is 1 even if the it is empty.
+	// Default alignment is 1 even if it is empty.
 	AlignSize natural_alignment = 1;
 	bool is_unaligned = false;
 	AlignSize size = 0;
 	AlignSize offset = 0;
 	bool is_packed = decl->is_packed;
-	VECEACH(members, i)
+	unsigned member_count = vec_size(members);
+	for (unsigned i = 0; i < member_count; i++)
 	{
 		Decl *member = decl->strukt.members[i];
 		if (!decl_ok(member))
@@ -217,6 +234,31 @@ static bool sema_analyse_struct_members(Context *context, Decl *decl, Decl **mem
 				continue;
 			}
 			continue;
+		}
+		Type *member_type = type_flatten_distinct(member->type);
+		if (member_type->type_kind == TYPE_STRUCT && member_type->decl->has_variable_array)
+		{
+			if (i != member_count - 1)
+			{
+				SEMA_ERROR(member, "A struct member with a flexible array must be the last element.");
+				return false;
+			}
+			decl->has_variable_array = true;
+		}
+		if (member_type->type_kind == TYPE_INFERRED_ARRAY)
+		{
+			if (i != member_count - 1)
+			{
+				SEMA_ERROR(member, "The flexible array member must be the last element.");
+				return false;
+			}
+			if (i == 0)
+			{
+				SEMA_ERROR(member, "The flexible array member cannot be the only element.");
+				return false;
+			}
+			member->type = type_get_flexible_array(member->type->array.base);
+			decl->has_variable_array = true;
 		}
 
 		if (!decl_ok(decl)) return false;
@@ -366,6 +408,12 @@ static bool sema_analyse_struct_union(Context *context, Decl *decl)
 
 	DEBUG_LOG("Beginning analysis of %s.", decl->name ? decl->name : "anon");
 	bool success;
+	Decl **members = decl->strukt.members;
+	if (!vec_size(members))
+	{
+		SEMA_ERROR(decl, decl->decl_kind == DECL_UNION ? "Zero sized unions are not permitted." : "Zero sized structs are not permitted.");
+		return false;
+	}
 	if (decl->name)
 	{
 		SCOPE_START
@@ -663,7 +711,13 @@ static inline bool sema_analyse_typedef(Context *context, Decl *decl)
 		return true;
 	}
 	if (!sema_resolve_type_info(context, decl->typedef_decl.type_info)) return false;
-	decl->type->canonical = decl->typedef_decl.type_info->type->canonical;
+	Type *type = decl->typedef_decl.type_info->type->canonical;
+	if (type == type_anyerr || type == type_any)
+	{
+		SEMA_ERROR(decl->typedef_decl.type_info, "%s may not be aliased.", type_quoted_error_string(type));
+		return false;
+	}
+	decl->type->canonical = type;
 	// Do we need anything else?
 	return true;
 }
@@ -683,11 +737,11 @@ static inline bool sema_analyse_distinct(Context *context, Decl *decl)
 	decl->distinct_decl.base_type = base;
 	switch (base->type_kind)
 	{
-		case TYPE_STRLIT:
 		case TYPE_FUNC:
 		case TYPE_TYPEDEF:
 		case TYPE_DISTINCT:
 		case CT_TYPES:
+		case TYPE_FLEXIBLE_ARRAY:
 			UNREACHABLE
 			return false;
 		case TYPE_FAILABLE_ANY:
@@ -1166,7 +1220,7 @@ AttributeType sema_analyse_attribute(Context *context, Attr *attr, AttributeDoma
 				return ATTRIBUTE_NONE;
 			}
 			if (!sema_analyse_expr(context, attr->expr)) return false;
-			if (attr->expr->expr_kind != EXPR_CONST || attr->expr->type->canonical != type_compstr)
+			if (attr->expr->expr_kind != EXPR_CONST || attr->expr->const_expr.const_kind != CONST_STRING)
 			{
 				SEMA_ERROR(attr->expr, "Expected a constant string value as argument.");
 				return ATTRIBUTE_NONE;
@@ -1216,6 +1270,139 @@ static inline bool sema_update_call_convention(Decl *decl, CallABI abi)
 	return had;
 }
 
+static inline bool sema_analyse_main_function(Context *context, Decl *decl)
+{
+	if (decl == context->main_function) return true;
+
+	if (decl->visibility == VISIBLE_LOCAL)
+	{
+		SEMA_ERROR(decl, "A main function may not have local visibility.");
+		return false;
+	}
+	FunctionSignature *signature = &decl->func_decl.function_signature;
+	Type *rtype = type_flatten_distinct(signature->rtype->type);
+	bool is_int_return = true;
+	bool is_err_return = false;
+	if (rtype->type_kind == TYPE_FAILABLE_ANY) is_err_return = true;
+	if (!is_err_return && type_is_failable(rtype))
+	{
+		if (rtype->failable->type_kind != TYPE_VOID)
+		{
+			SEMA_ERROR(signature->rtype, "The return type of 'main' cannot be a failable, unless it is 'void!'.");
+			return false;
+		}
+		is_int_return = false;
+		is_err_return = true;
+	}
+	if (rtype->type_kind == TYPE_VOID) is_int_return = false;
+
+	if (type_is_integer(rtype) && rtype != type_cint())
+	{
+		SEMA_ERROR(signature->rtype, "Expected a return type of 'void' or %s.", type_quoted_error_string(type_cint()));
+		return false;
+	}
+	// At this point the style is either MAIN_INT_VOID, MAIN_VOID_VOID or MAIN_ERR_VOID
+	Decl **params = signature->params;
+	unsigned param_count = vec_size(params);
+	bool subarray_param = false;
+	bool cparam = false;
+	switch (param_count)
+	{
+		case 0:
+			// This is the default style already set
+			break;
+		case 1:
+			if (type_flatten_distinct(params[0]->type) != type_get_subarray(type_get_subarray(type_char)))
+			{
+				SEMA_ERROR(params[0], "Expected a parameter of type 'char[][]'");
+				return false;
+			}
+			subarray_param = true;
+			break;
+		case 2:
+			if (type_flatten_distinct(params[0]->type) != type_cint())
+			{
+				SEMA_ERROR(params[0], "Expected a parameter of type %s for a C-style main.", type_quoted_error_string(type_cint()));
+				return false;
+			}
+			if (type_flatten_distinct(params[1]->type) != type_get_ptr(type_get_ptr(type_char)))
+			{
+				SEMA_ERROR(params[1], "Expected a parameter of type 'char**' for a C-style main.");
+				return false;
+			}
+			cparam = true;
+			break;
+		default:
+			SEMA_ERROR(params[0], "Expected zero, 1 or 2 parameters for main.");
+			return false;
+	}
+	if (!subarray_param && is_int_return)
+	{
+		// Int return is pass-through at the moment.
+		decl->visibility = VISIBLE_EXTERN;
+		return true;
+	}
+	Decl *function = decl_new(DECL_FUNC, decl->name_token, VISIBLE_EXTERN);
+	function->name = kw_mainstub;
+	function->extname = kw_main;
+	function->func_decl.function_signature.rtype = type_info_new_base(type_cint(), decl->span);
+	Decl *param1 = decl_new_generated_var(kw_argv, type_cint(), VARDECL_PARAM, decl->span);
+	Decl *param2 = decl_new_generated_var(kw_argc, type_get_ptr(type_get_ptr(type_char)), VARDECL_PARAM, decl->span);
+	Decl **main_params = NULL;
+	vec_add(main_params, param1);
+	vec_add(main_params, param2);
+	function->func_decl.function_signature.params = main_params;
+	Ast *body = new_ast(AST_COMPOUND_STMT, decl->span);
+	Ast *ret_stmt = new_ast(AST_RETURN_STMT, decl->span);
+	Expr *call = expr_new(EXPR_CALL, decl->span);
+	call->call_expr.function = expr_variable(decl);
+	if (subarray_param)
+	{
+		Expr *subarray = expr_new(EXPR_ARGV_TO_SUBARRAY, decl->span);
+		subarray->argv_expr.argc = param1;
+		subarray->argv_expr.argv = param2;
+		vec_add(call->call_expr.arguments, subarray);
+	}
+	else if (cparam)
+	{
+		vec_add(call->call_expr.arguments, expr_variable(param1));
+		vec_add(call->call_expr.arguments, expr_variable(param2));
+	}
+	// Unresolve them or the params cannot be resolved later.
+	param1->resolve_status = RESOLVE_NOT_DONE;
+	param2->resolve_status = RESOLVE_NOT_DONE;
+	if (is_int_return)
+	{
+		ret_stmt->return_stmt.expr = call;
+	}
+	else if (is_err_return)
+	{
+		Expr *try_expr = expr_new(EXPR_TRY, decl->span);
+		try_expr->inner_expr = call;
+		Expr *not_expr = expr_new(EXPR_UNARY, decl->span);
+		not_expr->unary_expr.expr = try_expr;
+		not_expr->unary_expr.operator = UNARYOP_NOT;
+		Expr *cast_expr = expr_new(EXPR_CAST, decl->span);
+		cast_expr->cast_expr.expr = not_expr;
+		cast_expr->cast_expr.type_info = type_info_new_base(type_cint(), decl->span);
+		ret_stmt->return_stmt.expr = cast_expr;
+	}
+	else
+	{
+		Ast *stmt = new_ast(AST_EXPR_STMT, decl->span);
+		stmt->expr_stmt = call;
+		vec_add(body->compound_stmt.stmts, stmt);
+		Expr *c = expr_new(EXPR_CONST, decl->span);
+		c->type = type_cint();
+		expr_const_set_int(&c->const_expr, 0, c->type->type_kind);
+		c->resolve_status = RESOLVE_DONE;
+		ret_stmt->expr_stmt = c;
+	}
+	vec_add(body->compound_stmt.stmts, ret_stmt);
+	function->func_decl.body = body;
+	context->main_function = function;
+	return true;
+}
 static inline bool sema_analyse_func(Context *context, Decl *decl)
 {
 	DEBUG_LOG("----Analysing function %s", decl->name);
@@ -1321,12 +1508,7 @@ static inline bool sema_analyse_func(Context *context, Decl *decl)
 	{
 		if (decl->name == kw_main)
 		{
-			if (decl->visibility == VISIBLE_LOCAL)
-			{
-				SEMA_ERROR(decl, "'main' cannot have local visibility.");
-				return false;
-			}
-			decl->visibility = VISIBLE_EXTERN;
+			if (!sema_analyse_main_function(context, decl)) return decl_poison(decl);
 		}
 		decl_set_external_name(decl);
 	}

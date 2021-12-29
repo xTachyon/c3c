@@ -12,7 +12,7 @@ static struct
 	Type f16, f32, f64, f128, fxx;
 	Type usz, isz, uptr, iptr, uptrdiff, iptrdiff;
 	Type voidstar, typeid, anyerr, typeinfo, ctlist;
-	Type str, any, anyfail;
+	Type any, anyfail;
 } t;
 
 Type *type_bool = &t.u1;
@@ -41,7 +41,6 @@ Type *type_u128 = &t.u128;
 Type *type_uptr = &t.uptr;
 Type *type_uptrdiff = &t.uptrdiff;
 Type *type_usize = &t.usz;
-Type *type_compstr = &t.str;
 Type *type_anyerr = &t.anyerr;
 Type *type_complist = &t.ctlist;
 Type *type_anyfail = &t.anyfail;
@@ -52,9 +51,10 @@ static AlignSize max_alignment_vector;
 
 #define PTR_OFFSET 0
 #define INFERRED_ARRAY_OFFSET 1
-#define SUB_ARRAY_OFFSET 2
-#define FAILABLE_OFFSET 3
-#define ARRAY_OFFSET 4
+#define FLEXIBLE_ARRAY_OFFSET 2
+#define SUB_ARRAY_OFFSET 3
+#define FAILABLE_OFFSET 4
+#define ARRAY_OFFSET 5
 
 Type *type_cint(void)
 {
@@ -146,12 +146,11 @@ const char *type_to_error_string(Type *type)
 			if (!type->failable) return "void!";
 			asprintf(&buffer, "%s!", type_to_error_string(type->failable));
 			return buffer;
-		case TYPE_STRLIT:
-			return "string literal";
 		case TYPE_ARRAY:
 			asprintf(&buffer, "%s[%llu]", type_to_error_string(type->array.base), (unsigned long long)type->array.len);
 			return buffer;
 		case TYPE_INFERRED_ARRAY:
+		case TYPE_FLEXIBLE_ARRAY:
 			asprintf(&buffer, "%s[*]", type_to_error_string(type->array.base));
 			return buffer;
 		case TYPE_SUBARRAY:
@@ -210,6 +209,8 @@ RETRY:
 		}
 		case CT_TYPES:
 			UNREACHABLE;
+		case TYPE_FLEXIBLE_ARRAY:
+			return 0;
 		case TYPE_FAILABLE:
 			type = type->failable;
 			goto RETRY;
@@ -235,7 +236,6 @@ RETRY:
 		case TYPE_ANYERR:
 		case TYPE_ANY:
 			return type->builtin.bytesize;
-		case TYPE_STRLIT:
 		case TYPE_FUNC:
 		case TYPE_POINTER:
 			return t.iptr.canonical->builtin.bytesize;
@@ -306,7 +306,6 @@ bool type_is_abi_aggregate(Type *type)
 		case TYPE_POINTER:
 		case TYPE_ENUM:
 		case TYPE_FUNC:
-		case TYPE_STRLIT:
 		case TYPE_VECTOR:
 		case TYPE_ANYERR:
 		case TYPE_ERRTYPE:
@@ -320,6 +319,7 @@ bool type_is_abi_aggregate(Type *type)
 		case TYPE_TYPEINFO:
 		case TYPE_INFERRED_ARRAY:
 		case TYPE_UNTYPED_LIST:
+		case TYPE_FLEXIBLE_ARRAY:
 			UNREACHABLE
 	}
 	UNREACHABLE
@@ -447,11 +447,11 @@ AlignSize type_abi_alignment(Type *type)
 			return type->builtin.abi_alignment;
 		case TYPE_FUNC:
 		case TYPE_POINTER:
-		case TYPE_STRLIT:
 		case TYPE_TYPEID:
 			return t.iptr.canonical->builtin.abi_alignment;
 		case TYPE_ARRAY:
 		case TYPE_INFERRED_ARRAY:
+		case TYPE_FLEXIBLE_ARRAY:
 			type = type->array.base;
 			goto RETRY;
 		case TYPE_SUBARRAY:
@@ -571,6 +571,33 @@ static Type *type_generate_inferred_array(Type *arr_type, bool canonical)
 	return arr;
 }
 
+static Type *type_generate_flexible_array(Type *arr_type, bool canonical)
+{
+	if (canonical) arr_type = arr_type->canonical;
+	if (!arr_type->type_cache)
+	{
+		create_type_cache(arr_type);
+	}
+
+	Type *arr = arr_type->type_cache[FLEXIBLE_ARRAY_OFFSET];
+	if (arr == NULL)
+	{
+		arr = type_new(TYPE_FLEXIBLE_ARRAY, strformat("%s[*]", arr_type->name));
+		arr->array.base = arr_type;
+		arr->array.len = 0;
+		arr_type->type_cache[FLEXIBLE_ARRAY_OFFSET] = arr;
+		if (arr_type == arr_type->canonical)
+		{
+			arr->canonical = arr;
+		}
+		else
+		{
+			arr->canonical = type_generate_flexible_array(arr_type->canonical, true);
+		}
+	}
+	return arr;
+}
+
 
 Type *type_get_ptr_recurse(Type *ptr_type)
 {
@@ -603,6 +630,11 @@ Type *type_get_subarray(Type *arr_type)
 Type *type_get_inferred_array(Type *arr_type)
 {
 	return type_generate_inferred_array(arr_type, false);
+}
+
+Type *type_get_flexible_array(Type *arr_type)
+{
+	return type_generate_flexible_array(arr_type, false);
 }
 
 static inline bool array_structurally_equivalent_to_struct(Type *array, Type *type)
@@ -722,10 +754,9 @@ Type *type_get_indexed_type(Type *type)
 		case TYPE_ARRAY:
 		case TYPE_SUBARRAY:
 		case TYPE_INFERRED_ARRAY:
+		case TYPE_FLEXIBLE_ARRAY:
 		case TYPE_VECTOR:
 			return type->array.base;
-		case TYPE_STRLIT:
-			return type_char;
 		case TYPE_DISTINCT:
 			type = type->decl->distinct_decl.base_type;
 			goto RETRY;
@@ -901,8 +932,11 @@ static void type_append_name_to_scratch(Type *type)
 			scratch_buffer_append_char('!');
 			break;
 		case TYPE_SUBARRAY:
-			type_append_name_to_scratch(type->pointer);
+			type_append_name_to_scratch(type->array.base);
 			scratch_buffer_append("[]");
+		case TYPE_FLEXIBLE_ARRAY:
+			type_append_name_to_scratch(type->array.base);
+			scratch_buffer_append("[*]");
 		case TYPE_VOID:
 		case TYPE_BOOL:
 		case TYPE_I8:
@@ -925,7 +959,6 @@ static void type_append_name_to_scratch(Type *type)
 		case TYPE_VECTOR:
 			scratch_buffer_append(type->name);
 			break;
-		case TYPE_STRLIT:
 		case TYPE_UNTYPED_LIST:
 		case TYPE_INFERRED_ARRAY:
 		case TYPE_TYPEINFO:
@@ -1017,7 +1050,6 @@ void type_setup(PlatformTarget *target)
 
 	type_init_int("void", &t.u0, TYPE_VOID, BITS8);
 
-	type_init("string", &t.str, TYPE_STRLIT, target->width_pointer, target->align_pointer);
 
 
 	type_create("typeinfo", &t.typeinfo, TYPE_TYPEINFO, 1, 1, 1);
@@ -1088,11 +1120,11 @@ bool type_is_scalar(Type *type)
 		case TYPE_VECTOR:
 		case TYPE_FAILABLE_ANY:
 		case TYPE_ANY:
+		case TYPE_FLEXIBLE_ARRAY:
 			return false;
 		case TYPE_BOOL:
 		case ALL_INTS:
 		case ALL_FLOATS:
-		case TYPE_STRLIT:
 		case TYPE_TYPEID:
 		case TYPE_POINTER:
 		case TYPE_ENUM:
@@ -1314,6 +1346,20 @@ static inline Type *type_find_max_ptr_type(Type *type, Type *other)
 }
 
 
+Type *type_decay_array_pointer(Type *type)
+{
+	assert(type->type_kind == TYPE_POINTER);
+	Type *ptr = type->pointer;
+	switch (ptr->type_kind)
+	{
+		case TYPE_ARRAY:
+			return type_get_ptr(ptr->array.base->canonical);
+		case TYPE_VECTOR:
+			return type_get_ptr(ptr->vector.base->canonical);
+		default:
+			return type;
+	}
+}
 Type *type_find_max_type(Type *type, Type *other)
 {
 	if (type == type_anyfail)
@@ -1352,6 +1398,7 @@ Type *type_find_max_type(Type *type, Type *other)
 		case TYPE_TYPEINFO:
 		case TYPE_ANY:
 		case TYPE_BITSTRUCT:
+		case TYPE_FLEXIBLE_ARRAY:
 			return NULL;
 		case ALL_INTS:
 			if (other->type_kind == TYPE_DISTINCT && type_underlying_is_numeric(other)) return other;
@@ -1361,6 +1408,28 @@ Type *type_find_max_type(Type *type, Type *other)
 			if (other->type_kind == TYPE_DISTINCT && type_is_float(other->decl->distinct_decl.base_type)) return other;
 			return type_find_max_num_type(type, other);
 		case TYPE_POINTER:
+			if (type->pointer->type_kind == TYPE_ARRAY)
+			{
+				Type *array_base = type->pointer->array.base->canonical;
+				if (other->type_kind == TYPE_SUBARRAY &&
+					array_base == other->array.base->canonical)
+				{
+					return other;
+				}
+			}
+			if (type->pointer->type_kind == TYPE_VECTOR)
+			{
+				Type *vector_base = type->pointer->vector.base->canonical;
+				if (other->type_kind == TYPE_SUBARRAY && vector_base == other->array.base->canonical)
+				{
+					return other;
+				}
+			}
+			// We need to decay the pointer
+			type = type_decay_array_pointer(type);
+			// And possibly the other pointer as well
+			if (other->type_kind == TYPE_POINTER) other = type_decay_array_pointer(other);
+
 			return type_find_max_ptr_type(type, other);
 		case TYPE_ENUM:
 			// IMPROVE: should there be implicit conversion between one enum and the other in
@@ -1378,17 +1447,6 @@ Type *type_find_max_type(Type *type, Type *other)
 			TODO
 		case TYPE_TYPEDEF:
 			UNREACHABLE
-		case TYPE_STRLIT:
-			if (other->type_kind == TYPE_DISTINCT)
-			{
-				// In this case we only react to the flattened type.
-				Type *flatten_other = type_flatten(other);
-				if (flatten_other->type_kind == TYPE_SUBARRAY && flatten_other->array.base->type_kind == TYPE_U8) return other;
-				if (flatten_other->type_kind == TYPE_POINTER && flatten_other->pointer->type_kind == TYPE_U8) return other;
-			}
-			if (other->type_kind == TYPE_SUBARRAY && other->array.base->type_kind == TYPE_U8) return other;
-			if (other->type_kind == TYPE_POINTER && other->pointer->type_kind == TYPE_U8) return other;
-			return NULL;
 		case TYPE_DISTINCT:
 			return NULL;
 		case TYPE_ARRAY:

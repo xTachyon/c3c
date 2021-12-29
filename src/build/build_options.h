@@ -78,6 +78,7 @@ typedef enum
 	COMPILE_NORMAL,
 	COMPILE_LEX_ONLY,
 	COMPILE_LEX_PARSE_ONLY,
+	COMPILE_LEX_PARSE_CHECK_ONLY,
 	COMPILE_OUTPUT_HEADERS,
 	COMPILE_OUTPUT_AST,
 } CompileOption;
@@ -183,9 +184,11 @@ typedef struct BuildOptions_
 	int linker_arg_count;
 	int build_threads;
 	const char** files;
+	const char* output_name;
 	const char* project_name;
 	const char* target_select;
 	const char* path;
+	uint32_t symtab_size;
 	unsigned version;
 	CompilerBackend backend;
 	CompilerCommand command;
@@ -230,6 +233,7 @@ typedef struct
 	bool output_ast : 1;
 	bool lex_only : 1;
 	bool parse_only : 1;
+	bool check_only : 1;
 	bool emit_llvm : 1;
 	bool emit_object_files : 1;
 	bool no_link : 1;
@@ -242,6 +246,10 @@ typedef struct
 	CompilerBackend backend;
 	uint32_t symtab_size;
 	uint32_t switchrange_max_size;
+	const char *cc;
+	const char *cflags;
+	const char **csource_dirs;
+	const char **csources;
 	struct
 	{
 		SoftFloat soft_float : 3;

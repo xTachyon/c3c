@@ -127,6 +127,9 @@ static void update_build_target_from_options(BuildTarget *target, BuildOptions *
 		case COMPILE_LEX_PARSE_ONLY:
 			target->parse_only = true;
 			break;
+		case COMPILE_LEX_PARSE_CHECK_ONLY:
+			target->check_only = true;
+			break;
 		case COMPILE_OUTPUT_HEADERS:
 			target->output_headers = true;
 			target->run_after_compile = false;
@@ -145,15 +148,15 @@ static void update_build_target_from_options(BuildTarget *target, BuildOptions *
 	}
 }
 
-void init_default_build_target(BuildTarget *target, BuildOptions *options, const char *name)
+void init_default_build_target(BuildTarget *target, BuildOptions *options)
 {
 	*target = (BuildTarget) {
 		.type = TARGET_TYPE_EXECUTABLE,
 		.source_dirs = options->files,
-		.name = name,
+		.name = options->output_name,
 		.optimization_level = OPTIMIZATION_DEFAULT,
 		.size_optimization_level = SIZE_OPTIMIZATION_NONE,
-		.symtab_size = DEFAULT_SYMTAB_SIZE,
+		.symtab_size = options->symtab_size ? options->symtab_size : DEFAULT_SYMTAB_SIZE,
 		.switchrange_max_size = DEFAULT_SWITCHRANGE_MAX_SIZE,
 		.debug_info = DEBUG_INFO_NONE,
 		.arch_os_target = ARCH_OS_TARGET_DEFAULT,

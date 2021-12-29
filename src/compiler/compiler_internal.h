@@ -26,17 +26,6 @@ typedef uint32_t ArraySize;
 typedef uint64_t BitSize;
 
 
-#if PLATFORM_WINDOWS
-#define DEFAULT_EXE "a.exe"
-#else
-#define DEFAULT_EXE "a.out"
-#endif
-
-#if PLATFORM_WINDOWS
-#define DEFAULT_OBJ_FILE_EXT ".obj"
-#else
-#define DEFAULT_OBJ_FILE_EXT ".o"
-#endif
 
 
 typedef uint32_t SourceLoc;
@@ -100,7 +89,7 @@ typedef enum
 	CONST_INIT_ARRAY,
 	CONST_INIT_ARRAY_FULL,
 	CONST_INIT_ARRAY_VALUE,
-	} ConstInitType;
+} ConstInitType;
 
 
 typedef struct ConstInitializer_
@@ -148,7 +137,7 @@ typedef struct
 		struct
 		{
 			const char *chars;
-			uint32_t len;
+			ArraySize len;
 		} string;
 		Decl *enum_val;
 		Decl *err_val;
@@ -174,25 +163,21 @@ typedef struct
 	AstId end;
 } DeferList;
 
-
+typedef unsigned FileId;
 typedef struct
 {
+	FileId file_id;
 	const char *contents;
 	char *name;
 	char *dir_path;
 	const char *full_path;
-	SourceLoc start_id;
-	SourceLoc end_id;
-	SourceLoc *lines;
-	SourceLoc current_line_start;
-	uint32_t token_start_id;
 } File;
 
 typedef struct
 {
-	File *file;
-	uint32_t line;
-	uint32_t col;
+	FileId file_id;
+	uint16_t col;
+	uint32_t row;
 	uint32_t start;
 	uint32_t length;
 } SourceLocation;
@@ -364,6 +349,7 @@ typedef struct VarDecl_
 	VarDeclKind kind : 8;
 	bool constant : 1;
 	bool unwrap : 1;
+	bool shadow : 1;
 	bool vararg : 1;
 	bool is_static : 1;
 	bool is_threadlocal : 1;
@@ -919,6 +905,28 @@ typedef struct
 	Token identifier;
 	BuiltinFunction builtin;
 } ExprBuiltin;
+
+typedef struct
+{
+	bool is_assign : 1;
+	bool is_deref : 1;
+	union
+	{
+		struct
+		{
+			TokenId new_ident;
+			Expr *variant_expr;
+		};
+		Decl *variable;
+	};
+} ExprVariantSwitch;
+
+typedef struct
+{
+	Decl *argc;
+	Decl *argv;
+} ExprArgv;
+
 struct Expr_
 {
 	ExprKind expr_kind : 8;
@@ -926,10 +934,12 @@ struct Expr_
 	SourceSpan span;
 	Type *type;
 	union {
+		ExprVariantSwitch variant_switch;
 		ExprLen len_expr;
 		ExprCast cast_expr;
 		TypeInfo *type_expr;
 		ExprConst const_expr;
+		ExprArgv argv_expr;
 		ExprGuard rethrow_expr;
 		Decl *decl_expr;
 		ExprOrError or_error_expr;
@@ -1335,20 +1345,27 @@ typedef union
 
 typedef struct
 {
-	uint32_t lexer_index;
 	const char *file_begin;
+	uint32_t token_start_id;
 	const char *lexing_start;
 	const char *current;
-	uint16_t source_file;
-	uint32_t current_line;
+	uint32_t current_row;
+	uint32_t start_row;
 	const char *line_start;
-	File *current_file;
-	SourceLoc last_in_range;
+	const char *start_row_start;
+	File *file;
 	TokenData *latest_token_data;
 	SourceLocation *latest_token_loc;
 	unsigned char *latest_token_type;
 } Lexer;
 
+typedef struct
+{
+	uint32_t lexer_index;
+	Token tok;
+	TokenId prev_tok;
+	Token next_tok;
+} LexingContext;
 
 typedef struct Context_
 {
@@ -1363,6 +1380,7 @@ typedef struct Context_
 	Decl **types;
 	Decl **generic_defines;
 	Decl **functions;
+	Decl *main_function;
 	Decl **macros;
 	Decl **generics;
 	Decl **generic_methods;
@@ -1401,12 +1419,7 @@ typedef struct Context_
 	};
 	Decl* locals[MAX_LOCALS];
 	DynamicScope active_scope;
-	Lexer *lexer;
-	Token tok;
-	TokenId prev_tok;
-	Token next_tok;
-	TokenId docs_start;
-	TokenId docs_end;
+	LexingContext lex;
 	void *llvm_debug_file;
 	void *llvm_debug_compile_unit;
 } Context;
@@ -1526,7 +1539,7 @@ extern Type *poisoned_type;
 extern TypeInfo *poisoned_type_info;
 
 
-extern Type *type_bool, *type_void, *type_compstr, *type_voidptr;
+extern Type *type_bool, *type_void, *type_voidptr;
 extern Type *type_half, *type_float, *type_double, *type_quad;
 extern Type *type_ichar, *type_short, *type_int, *type_long, *type_isize;
 extern Type *type_char, *type_ushort, *type_uint, *type_ulong, *type_usize;
@@ -1539,6 +1552,7 @@ extern Type *type_anyfail;
 
 extern const char *attribute_list[NUMBER_OF_ATTRIBUTES];
 extern const char *builtin_list[NUMBER_OF_BUILTINS];
+
 extern const char *kw_std;
 extern const char *kw_max;
 extern const char *kw_min;
@@ -1562,6 +1576,7 @@ extern const char *kw_reqparse;
 extern const char *kw_require;
 extern const char *kw_pure;
 extern const char *kw_param;
+extern const char *kw_ptr;
 extern const char *kw_errors;
 extern const char *kw___ceil;
 extern const char *kw___round;
@@ -1589,6 +1604,10 @@ extern const char *kw_builtin_exp;
 extern const char *kw_builtin_fabs;
 extern const char *kw_builtin_fma;
 extern const char *kw_builtin_cmpxchg;
+extern const char *kw_argc;
+extern const char *kw_argv;
+extern const char *kw_mainstub;
+
 
 
 #define AST_NEW_TOKEN(_kind, _token) new_ast(_kind, source_span_from_token_id((_token).id))
@@ -1617,7 +1636,7 @@ static inline Ast *new_ast(AstKind kind, SourceSpan range)
 
 static inline Ast *extend_ast_with_prev_token(Context *context, Ast *ast)
 {
-	ast->span.end_loc = context->prev_tok;
+	ast->span.end_loc = context->lex.prev_tok;
 	return ast;
 }
 
@@ -1778,9 +1797,9 @@ Decl *decl_new(DeclKind decl_kind, TokenId name, Visibility visibility);
 Decl *decl_new_with_type(TokenId name, DeclKind decl_type, Visibility visibility);
 Decl *decl_new_var(TokenId name, TypeInfo *type, VarDeclKind kind, Visibility visibility);
 Decl *decl_new_generated_var(const char *name, Type *type, VarDeclKind kind, SourceSpan span);
-#define DECL_NEW(_kind, _vis) decl_new(_kind, context->tok.id, _vis)
-#define DECL_NEW_WITH_TYPE(_kind, _vis) decl_new_with_type(context->tok.id, _kind, _vis)
-#define DECL_NEW_VAR(_type, _kind, _vis) decl_new_var(context->tok.id, _type, _kind, _vis)
+#define DECL_NEW(_kind, _vis) decl_new(_kind, context->lex.tok.id, _vis)
+#define DECL_NEW_WITH_TYPE(_kind, _vis) decl_new_with_type(context->lex.tok.id, _kind, _vis)
+#define DECL_NEW_VAR(_type, _kind, _vis) decl_new_var(context->lex.tok.id, _type, _kind, _vis)
 void decl_set_external_name(Decl *decl);
 const char *decl_to_name(Decl *decl);
 
@@ -1875,11 +1894,9 @@ bool float_const_fits_type(const ExprConst *expr_const, TypeKind kind);
 // --- Lexer functions
 
 
-Token lexer_advance(Lexer *lexer);
 bool lexer_scan_ident_test(Lexer *lexer, const char *scan);
 void lexer_init_for_test(Lexer *lexer, const char *text, size_t len);
-void lexer_init_with_file(Lexer *lexer, File *file);
-File* lexer_current_file(Lexer *lexer);
+void lexer_lex_file(Lexer *lexer);
 
 
 static inline SourceLocation *tokenid_loc(TokenId token) { return sourcelocptr(token.index); }
@@ -1964,9 +1981,8 @@ void sema_error(Context *context, const char *message, ...);
 void sema_prev_at_range3(SourceSpan span, const char *message, ...);
 void sema_shadow_error(Decl *decl, Decl *old);
 
+File *source_file_by_id(FileId file);
 File *source_file_load(const char *filename, bool *already_loaded);
-void source_file_append_line_end(File *file, SourceLoc loc);
-SourcePosition source_file_find_position_in_file(File *file, SourceLoc loc);
 
 static inline SourceSpan source_span_from_token_id(TokenId id)
 {
@@ -1974,7 +1990,7 @@ static inline SourceSpan source_span_from_token_id(TokenId id)
 }
 
 
-#define RANGE_EXTEND_PREV(x) ((x)->span.end_loc = context->prev_tok)
+#define RANGE_EXTEND_PREV(x) ((x)->span.end_loc = context->lex.prev_tok)
 
 void stable_init(STable *table, uint32_t initial_size);
 void *stable_set(STable *table, const char *key, void *value);
@@ -2034,6 +2050,7 @@ Type *type_get_ptr(Type *ptr_type);
 Type *type_get_ptr_recurse(Type *ptr_type);
 Type *type_get_subarray(Type *arr_type);
 Type *type_get_inferred_array(Type *arr_type);
+Type *type_get_flexible_array(Type *arr_type);
 Type *type_get_failable(Type *failable_type);
 Type *type_get_vector(Type *vector_type, unsigned len);
 Type *type_get_vector_bool(Type *original_type);
@@ -2238,7 +2255,7 @@ void advance(Context *context);
 // Useful sanity check function.
 static inline void advance_and_verify(Context *context, TokenType token_type)
 {
-	assert(context->tok.type == token_type);
+	assert(context->lex.tok.type == token_type);
 	advance(context);
 }
 
@@ -2459,6 +2476,7 @@ static inline AlignSize type_min_alignment(AlignSize a, AlignSize b)
 bool obj_format_linking_supported(ObjectFormatType format_type);
 bool linker(const char *output_file, const char **files, unsigned file_count);
 void platform_linker(const char *output_file, const char **files, unsigned file_count);
+void platform_compiler(const char **files, unsigned file_count, const char* flags);
 
 #define CAT(a,b) CAT2(a,b) // force expand
 #define CAT2(a,b) a##b // actually concatenate

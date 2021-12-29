@@ -113,7 +113,6 @@ static bool x86_should_return_type_in_reg(Type *type)
 		case TYPE_TYPEDEF:
 		case TYPE_DISTINCT:
 		case TYPE_ENUM:
-		case TYPE_STRLIT:
 		case TYPE_ERRTYPE:
 		case TYPE_TYPEID:
 		case TYPE_ANYERR:
@@ -121,6 +120,7 @@ static bool x86_should_return_type_in_reg(Type *type)
 		case CT_TYPES:
 		case TYPE_FAILABLE:
 		case TYPE_FAILABLE_ANY:
+		case TYPE_FLEXIBLE_ARRAY:
 			UNREACHABLE
 		case ALL_INTS:
 		case ALL_FLOATS:
@@ -143,7 +143,6 @@ static bool x86_should_return_type_in_reg(Type *type)
 	VECEACH (members, i)
 	{
 		Type *member_type = members[i]->type;
-		if (type_is_empty_field(member_type, true)) continue;
 		if (!x86_should_return_type_in_reg(member_type)) return false;
 	}
 	return true;
@@ -202,11 +201,6 @@ ABIArgInfo *x86_classify_return(CallABI call, Regs *regs, Type *type)
 		if (type_is_structlike(type) && type->decl->has_variable_array)
 		{
 			return create_indirect_return_x86(type, regs);
-		}
-		// Ignore empty struct/unions
-		if (type_is_empty_record(type, true))
-		{
-			return abi_arg_ignore();
 		}
 
 		// Check if we can return it in a register.
@@ -479,11 +473,6 @@ static inline ABIArgInfo *x86_classify_aggregate(CallABI call, Regs *regs, Type 
 		// TODO, check why this should not be by_val
 		return x86_create_indirect_result(regs, type, BY_VAL);
 	}
-	// Ignore empty unions / structs on non-win.
-	if (!platform_target.x86.is_win32_float_struct_abi && type_is_empty_record(type, true))
-	{
-		return abi_arg_ignore();
-	}
 
 	unsigned size = type_size(type);
 	bool needs_padding_in_reg = false;
@@ -595,10 +584,10 @@ static ABIArgInfo *x86_classify_argument(CallABI call, Regs *regs, Type *type)
 		case TYPE_FUNC:
 		case TYPE_TYPEID:
 		case TYPE_BITSTRUCT:
-		case TYPE_STRLIT:
 		case TYPE_FAILABLE:
 		case TYPE_FAILABLE_ANY:
 		case CT_TYPES:
+		case TYPE_FLEXIBLE_ARRAY:
 			UNREACHABLE
 		case ALL_FLOATS:
 		case ALL_INTS:

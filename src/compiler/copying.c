@@ -70,6 +70,8 @@ Expr *copy_expr(Expr *source_expr)
 	switch (source_expr->expr_kind)
 	{
 		case EXPR_MACRO_BODY_EXPANSION:
+		case EXPR_VARIANTSWITCH:
+		case EXPR_ARGV_TO_SUBARRAY:
 			UNREACHABLE
 		case EXPR_FLATPATH:
 		case EXPR_UNDEF:
@@ -127,6 +129,7 @@ Expr *copy_expr(Expr *source_expr)
 		case EXPR_FAILABLE:
 		case EXPR_GROUP:
 		case EXPR_TYPEOFANY:
+		case EXPR_PTR:
 			MACRO_COPY_EXPR(expr->inner_expr);
 			return expr;
 		case EXPR_COND:

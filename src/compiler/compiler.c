@@ -69,14 +69,16 @@ static void compiler_lex(void)
 		bool loaded = false;
 		File *file = source_file_load(global_context.sources[i], &loaded);
 		if (loaded) continue;
-		Lexer lexer;
-		lexer_init_with_file(&lexer, file);
+		Lexer lexer = { .file = file };
+		lexer_lex_file(&lexer);
 		printf("# %s\n", file->full_path);
+		uint32_t index = lexer.token_start_id;
 		while (1)
 		{
-			Token token = lexer_advance(&lexer);
-			printf("%s ", token_type_to_string(token.type));
-			if (token.type == TOKEN_EOF) break;
+			TokenType token_type = (TokenType)(*toktypeptr(index));
+			index++;
+			printf("%s ", token_type_to_string(token_type));
+			if (token_type == TOKEN_EOF) break;
 		}
 		printf("\n");
 	}
@@ -270,6 +272,20 @@ static void setup_int_define(const char *id, uint64_t i, Type *type)
 	}
 }
 
+static const char *active_target_name(void)
+{
+	if (active_target.name) return active_target.name;
+	switch (active_target.arch_os_target)
+	{
+		case X86_WINDOWS:
+		case X64_WINDOWS:
+		case X64_WINDOWS_GNU:
+			return "a.exe";
+		default:
+			return "a.out";
+	}
+}
+
 static void setup_bool_define(const char *id, bool value)
 {
 	TokenType token_type = TOKEN_CONST_IDENT;
@@ -303,7 +319,7 @@ void compiler_compile(void)
 
 	if (global_context.lib_dir)
 	{
-		file_add_wildcard_files(&global_context.sources, global_context.lib_dir, true);
+		file_add_wildcard_files(&global_context.sources, global_context.lib_dir, true, ".c3", ".c3i");
 	}
 	bool has_error = false;
 	VECEACH(global_context.sources, i)
@@ -355,6 +371,8 @@ void compiler_compile(void)
 		}
 		return;
 	}
+
+	if (active_target.check_only) return;
 
 	void **gen_contexts = NULL;
 	void (*task)(void *);
@@ -417,8 +435,27 @@ void compiler_compile(void)
 		error_exit("No output files found.");
 	}
 
-	CompileData *compile_data = malloc(sizeof(CompileData) * output_file_count);
-	const char **obj_files = malloc(sizeof(char*) * output_file_count);
+	unsigned cfiles = vec_size(active_target.csources);
+	CompileData *compile_data = cmalloc(sizeof(CompileData) * output_file_count);
+	const char **obj_files = cmalloc(sizeof(char*) * (output_file_count + cfiles));
+
+	if (cfiles)
+	{
+		platform_compiler(active_target.csources, cfiles, active_target.cflags);
+		for (int i = 0; i < cfiles; i++)
+		{
+			char *filename = NULL;
+			char *dir = NULL;
+			bool split_worked = filenamesplit(active_target.csources[i], &filename, NULL);
+			assert(split_worked);
+			size_t len = strlen(filename);
+			// .c -> .o (quick hack to fix the name on linux)
+			filename[len - 1] = 'o';
+			obj_files[output_file_count + i] = filename;
+		}
+
+	}
+
 
 	TaskQueueRef queue = taskqueue_create(16);
 
@@ -439,17 +476,19 @@ void compiler_compile(void)
 		assert(obj_files[i] || !create_exe);
 	}
 
+	output_file_count += cfiles;
 	free(compile_data);
 
 	if (create_exe)
 	{
+		const char *output_name = active_target_name();
 		if (active_target.arch_os_target == ARCH_OS_TARGET_DEFAULT)
 		{
-			platform_linker(active_target.name, obj_files, output_file_count);
+			platform_linker(output_name, obj_files, output_file_count);
 		}
 		else
 		{
-			if (!obj_format_linking_supported(platform_target.object_format) || !linker(active_target.name, obj_files,
+			if (!obj_format_linking_supported(platform_target.object_format) || !linker(output_name, obj_files,
 			                                                                            output_file_count))
 			{
 				printf("No linking is performed due to missing linker support.\n");
@@ -458,7 +497,7 @@ void compiler_compile(void)
 		}
 		if (active_target.run_after_compile)
 		{
-			system(strformat("./%s", active_target.name));
+			system(strformat("./%s", output_name));
 		}
 	}
 
@@ -466,12 +505,14 @@ void compiler_compile(void)
 	exit_compiler(COMPILER_SUCCESS_EXIT);
 }
 
-static void target_expand_source_names(BuildTarget *target)
+static const char **target_expand_source_names(const char** dirs, const char *suffix1, const char *suffix2, bool error_on_mismatch)
 {
 	const char **files = NULL;
-	VECEACH(target->source_dirs, i)
+	size_t len1 = strlen(suffix1);
+	size_t len2 = strlen(suffix2);
+	VECEACH(dirs, i)
 	{
-		const char *name = target->source_dirs[i];
+		const char *name = dirs[i];
 		size_t name_len = strlen(name);
 		if (name_len < 1) goto INVALID_NAME;
 		if (name[name_len - 1] == '*')
@@ -480,7 +521,7 @@ static void target_expand_source_names(BuildTarget *target)
 			{
 				char *path = strdup(name);
 				path[name_len - 1] = '\0';
-				file_add_wildcard_files(&files, path, false);
+				file_add_wildcard_files(&files, path, false, suffix1, suffix2);
 				free(path);
 				continue;
 			}
@@ -489,26 +530,27 @@ static void target_expand_source_names(BuildTarget *target)
 			{
 				char *path = strdup(name);
 				path[name_len - 2] = '\0';
-				file_add_wildcard_files(&files, path, true);
+				file_add_wildcard_files(&files, path, true, suffix1, suffix2);
 				free(path);
 				continue;
 			}
 			goto INVALID_NAME;
 		}
 		if (name_len < 4) goto INVALID_NAME;
-		if (strcmp(&name[name_len - 3], ".c3") != 0 &&
-		    (name_len < 5 || strcmp(&name[name_len - 4], ".c3t") != 0)) goto INVALID_NAME;
+		if (strcmp(&name[name_len - len1], suffix1) != 0 &&
+		    (name_len < 5 || strcmp(&name[name_len - len2], suffix2) != 0)) goto INVALID_NAME;
 		vec_add(files, name);
 		continue;
 		INVALID_NAME:
-		error_exit("File names must end with .c3 or they cannot be compiled: '%s' is invalid.", name);
+		if (!error_on_mismatch) continue;
+		error_exit("File names must end with %s or they cannot be compiled: '%s' is invalid.", name, suffix1);
 	}
-	target->sources = files;
+	return files;
 }
 
 void compile_target(BuildOptions *options)
 {
-	init_default_build_target(&active_target, options, DEFAULT_EXE);
+	init_default_build_target(&active_target, options);
 	compile();
 }
 
@@ -520,7 +562,11 @@ void compile_file_list(BuildOptions *options)
 
 void compile()
 {
-	target_expand_source_names(&active_target);
+	active_target.sources = target_expand_source_names(active_target.source_dirs, ".c3", ".c3t", true);
+	if (active_target.csource_dirs)
+	{
+		active_target.csources = target_expand_source_names(active_target.csource_dirs, ".c", ".c", false);
+	}
 	global_context.sources = active_target.sources;
 	symtab_init(active_target.symtab_size ? active_target.symtab_size : 64 * 1024);
 	target_setup(&active_target);

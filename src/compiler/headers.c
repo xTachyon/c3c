@@ -97,6 +97,8 @@ static void header_print_type(FILE *file, Type *type)
 		case TYPE_ERRTYPE:
 			OUTPUT("enum %s__", type->decl->external_name);
 			return;
+		case TYPE_FLEXIBLE_ARRAY:
+			TODO
 		case TYPE_FUNC:
 			TODO
 		case TYPE_STRUCT:
@@ -112,8 +114,6 @@ static void header_print_type(FILE *file, Type *type)
 			break;
 		case TYPE_TYPEDEF:
 			break;
-		case TYPE_STRLIT:
-			UNREACHABLE
 		case TYPE_ARRAY:
 			break;
 		case TYPE_ANY:

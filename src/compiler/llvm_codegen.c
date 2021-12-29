@@ -328,6 +328,7 @@ void llvm_emit_ptr_from_array(GenContext *c, BEValue *value)
 			return;
 		case TYPE_ARRAY:
 		case TYPE_VECTOR:
+		case TYPE_FLEXIBLE_ARRAY:
 			return;
 		case TYPE_SUBARRAY:
 		{
@@ -339,8 +340,6 @@ void llvm_emit_ptr_from_array(GenContext *c, BEValue *value)
 			llvm_value_set_address_align(value, member.value, type_get_ptr(value->type->array.base), type_abi_alignment(value->type->array.base));
 			return;
 		}
-		case TYPE_STRLIT:
-			return;
 		default:
 			UNREACHABLE
 	}
@@ -985,7 +984,7 @@ void *llvm_gen(Module *module)
 {
 	if (!vec_size(module->contexts)) return NULL;
 	assert(intrinsics_setup);
-	GenContext *gen_context = calloc(sizeof(GenContext), 1);
+	GenContext *gen_context = cmalloc(sizeof(GenContext));
 	gencontext_init(gen_context, module);
 	gencontext_begin_module(gen_context);
 
@@ -1015,6 +1014,7 @@ void *llvm_gen(Module *module)
 		{
 			llvm_emit_function_decl(gen_context, context->functions[i]);
 		}
+		if (context->main_function) llvm_emit_function_decl(gen_context, context->main_function);
 	}
 
 	VECEACH(module->contexts, j)
@@ -1036,6 +1036,8 @@ void *llvm_gen(Module *module)
 			Decl *decl = context->functions[i];
 			if (decl->func_decl.body) llvm_emit_function_body(gen_context, decl);
 		}
+		if (context->main_function) llvm_emit_function_body(gen_context, context->main_function);
+
 		VECEACH(context->methods, i)
 		{
 			Decl *decl = context->methods[i];

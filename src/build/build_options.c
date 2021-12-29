@@ -79,6 +79,8 @@ static void usage(void)
 	OUTPUT("  -V --version          - Print version information.");
 	OUTPUT("  -E                    - Lex only.");
 	OUTPUT("  -P                    - Only parse and output the AST as S-expressions.");
+	OUTPUT("  -C                    - Only lex, parse and check.");
+	OUTPUT("  -o <file>             - Write output to <file>.");
 	OUTPUT("  -O0                   - Optimizations off.");
 	OUTPUT("  -O1                   - Simple optimizations only.");
 	OUTPUT("  -O2                   - Default optimization level.");
@@ -277,10 +279,10 @@ static void print_all_targets(void)
 
 static void print_version(void)
 {
-	OUTPUT("C3 Compiler Version:   Pre-alpha %s", COMPILER_VERSION);
-	OUTPUT("Installed directory:   %s", find_executable_path());
-	OUTPUT("LLVM version:          %s", llvm_version);
-	OUTPUT("LLVM default target:   %s", llvm_target);
+	OUTPUT("C3 Compiler Version (pre-alpha):   %s", COMPILER_VERSION);
+	OUTPUT("Installed directory:               %s", find_executable_path());
+	OUTPUT("LLVM version:                      %s", llvm_version);
+	OUTPUT("LLVM default target:               %s", llvm_target);
 }
 
 static void parse_option(BuildOptions *options)
@@ -349,6 +351,10 @@ static void parse_option(BuildOptions *options)
 			if (at_end()) error_exit("error: -z needs a value");
 			options->linker_args[options->linker_arg_count++] = next_arg();
 			return;
+		case 'o':
+			if (at_end()) error_exit("error: -o needs a name");
+			options->output_name = next_arg();
+			return;
 		case 'O':
 			if (options->optimization_setting_override != OPT_SETTING_NOT_SET)
 			{
@@ -397,6 +403,13 @@ static void parse_option(BuildOptions *options)
 			}
 			options->compile_option = COMPILE_LEX_PARSE_ONLY;
 			return;
+		case 'C':
+			if (options->compile_option != COMPILE_NORMAL)
+			{
+				FAIL_WITH_ERR("Illegal combination of compile options.");
+			}
+			options->compile_option = COMPILE_LEX_PARSE_CHECK_ONLY;
+			return;
 		case '-':
 			if (match_longopt("tinybackend"))
 			{
@@ -406,6 +419,15 @@ static void parse_option(BuildOptions *options)
 #else
 				error_exit("error: The TinyBackend is not supported on this platform.");
 #endif
+			}
+			if (match_longopt("symtab"))
+			{
+				if (at_end() || next_is_opt()) error_exit("error: --symtab needs a valid integer.");
+				const char *symtab_string = next_arg();
+				int symtab = atoi(symtab_string);
+				if (symtab < 1024) OUTPUT("Expected a valid positive integer >= 1024.");
+				options->symtab_size = next_highest_power_of_2(symtab);
+				return;
 			}
 			if (match_longopt("version"))
 			{

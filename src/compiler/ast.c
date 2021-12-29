@@ -221,8 +221,12 @@ bool expr_is_pure(Expr *expr)
 		case EXPR_CONST_IDENTIFIER:
 		case EXPR_IDENTIFIER:
 		case EXPR_NOP:
+		case EXPR_PTR:
 			return true;
+		case EXPR_ARGV_TO_SUBARRAY:
 		case EXPR_BITASSIGN:
+			return false;
+		case EXPR_VARIANTSWITCH:
 			return false;
 		case EXPR_BINARY:
 			if (expr->binary_expr.operator >= BINARYOP_ASSIGN) return false;
