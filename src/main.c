@@ -16,7 +16,11 @@ bool debug_stats = false;
 int main(int argc, const char *argv[]);
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-	mkdir("tmp", 0700);
+	static bool dir_created = false;
+	if (!dir_created) {
+		dir_created = true;
+		mkdir("tmp", 0700);
+	}
 
 	char test_file[1024];
 	sprintf(test_file, "tmp/test_%u.c3", (unsigned) getpid());
